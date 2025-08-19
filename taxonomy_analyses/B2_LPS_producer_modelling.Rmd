@@ -1,0 +1,144 @@
+---
+title: "LPS Taxa Modelling"
+author: "Stephanie Wilson"
+date: "January 2024"
+output: html_document
+---
+
+## Summary
+
+Examine the relationship between polyphenol intake (prenol lipids, phenylpropanoic acids) and the abundance of pro-inflammatory LPS (Gammaproteobacteria, Enterobacteriaceae) and major LPS-producers in the healthy human gut (Bacteroidales).
+
+## Input
+
+-   **metadata_313.csv** - meta data for subjects with diet and metagenome data
+-   **LPS_related_bacteria_metagenomic.csv** - Abundances of select bacterial taxa relevant for LPS Binding Protein Analysis
+
+## Output
+
+-   Effect plots for polyphenol intake, including publication ready summary plot: LPS_producers_model_plot.png
+-   Results in line model output.
+
+## Load packages and data
+
+Packages
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse); library(effects); library(car);  library(bestNormalize)
+library(gamair); library(mgcv) # For GAM
+library(Rfit) #For Rank-Based Estimation Regrsesion
+library(ggeffects); library(ggpubr)
+
+source("functions/annotate_lm_plot.R")
+```
+
+Metadata and Dietary Data
+
+```{r message = FALSE}
+load("RData/metadata_313.Rdata")
+
+LPS_bacteria = read.csv('data/LPS_related_bacteria_metagenomic.csv')
+
+cleaned_data = cleaned_data %>%
+  mutate(entero_binomial = ifelse(f__Enterobacteriaceae > 0, 1, 0),
+         Prenol_Phenylprop = Prenol.lipids + Phenylpropanoic.acids) %>%
+  left_join(LPS_bacteria)
+```
+
+## 1) Exploratory
+
+How many zeros are we looking at?
+
+```{r}
+message("Participants without Gammaprotebacteria: ", 
+        sum(cleaned_data$c__Gammaproteobacteria== 0),
+        "\nParticipants without Enterobacteriaceae: ", 
+        sum(cleaned_data$f__Enterobacteriaceae== 0))
+```
+
+## 2) Modelling
+
+### 2a) Rank-based Estimation Regression - Gammaproteobacteria
+
+```{r}
+gamma_transform = bestNormalize(cleaned_data$c__Gammaproteobacteria)
+cleaned_data$gamma_log = gamma_transform$other_transforms$log_x$x.t
+
+model_gamma_lm = lm(gamma_log ~ Prenol_Phenylprop + Sex + Age + BMI
+                    + fiber_g1000kcal + hei_asa24_totalscore, data = cleaned_data %>% filter(!UserName == "7098"))
+
+summary(model_gamma_lm)
+resid_panel(model_gamma_lm)
+```
+
+### 2b) Logistic Regression - Enterobacteriaceae
+
+Consumption of polyphenols considered phenylpropanoic acids and prenol lipids did not impact the probability of having Enterobacteriaceae (p = 0.41).
+
+```{r}
+mod_glm = glm(entero_binomial ~ Prenol_Phenylprop + Age + Sex + BMI +
+                fiber_g1000kcal + hei_asa24_totalscore, family = "binomial", 
+              data = cleaned_data)
+summary(mod_glm)
+```
+
+### 2c) Bacteroidales
+
+All participants have Bacteroidales, no zeros.
+
+```{r}
+bact_transform = bestNormalize(cleaned_data$Bacteroidales)
+cleaned_data$Bacteroidales_yeo = bact_transform$x.t
+
+mod_bacteroidales_lm  = lm(Bacteroidales_yeo ~ Prenol_Phenylprop + Sex + Age + BMI
+                    + fiber_g1000kcal + hei_asa24_totalscore, data = cleaned_data)
+summary(mod_bacteroidales_lm)
+
+ggResidpanel::resid_panel(mod_bacteroidales_lm)
+```
+
+## Publication Ready Plots
+
+### 2a 
+```{r}
+gamma_plot = annotate_lm_plot(model_gamma_lm, "Prenol_Phenylprop", 1.1) + 
+  labs(
+    x = "Intake of Prenol Lipids,\nPhenylpropanoic Acids\n(mg/1000 kcal)",
+    y = expression(atop("Gammaproteobacteria", "Abundance (log"[10]*"-transformed)")))
+```
+
+### 2b
+```{r}
+glm_eff = ggpredict(mod_glm, terms = "Prenol_Phenylprop")
+
+# Plot the effect
+entero_plot = plot(glm_eff) +
+  geom_jitter(data = mod_glm$data, aes(x = Prenol_Phenylprop, y = entero_binomial),
+              width = 0, height = 0.02, alpha = 0.3) +
+  labs(title = "",
+       x = "Intake of Prenol Lipids,\nPhenylpropanoic Acids\n(mg/1000 kcal)",
+       y = expression(Pr(italic(Enterobacteriaceae)))) +
+  annotate("text", x = max(mod_glm$data$Prenol_Phenylprop) *0.9, 
+                   y = 0.9,
+             label = bquote(atop(beta == .(round(mod_glm$coefficients[2], 3)),
+                        "p = 0.46")),
+             hjust = 0, vjust = 1) + 
+  theme_bw()
+```
+
+### 2c
+```{r}
+bact_plot = annotate_lm_plot(mod_bacteroidales_lm, "Prenol_Phenylprop", 1.2) + 
+  labs(
+    x = "Intake of Prenol Lipids,\nPhenylpropanoic Acids\n(mg/1000 kcal)",
+    y = expression(atop(italic("Bacteroidales") ~ "Abundance", "Yeo-Johnson Transformed")))
+```
+
+Merge and Export Plots
+```{r}
+combined_plot = ggarrange(gamma_plot, entero_plot, bact_plot, ncol = 3, labels = c("A)", "B)", "C)"), align = "hv")
+
+ggsave(combined_plot, file = 'images/LPS_producers_model_plot.png', 
+       units = "in", dpi = 300, width = 9, height = 3.5)
+```
+

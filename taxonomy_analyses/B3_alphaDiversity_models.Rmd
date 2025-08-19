@@ -1,0 +1,121 @@
+---
+title: "B3_alpha_diversity_analyses"
+author: "Stephanie Wilson"
+date: "April 2025"
+output: html_document
+---
+
+## SUMMARY
+This script prepares data to analyze the relationship between polyphenol intake (total, diversity) and alpha diversity indices (richness and evenness) for FL100 metagenomic data.
+
+## INPUT
+  - **FL100_metagenome_Meta.RData** - metadata + metagenomic and polyphenol alpha diversity metrics
+
+## OUTPUT
+  - **FL100_alpha_diversity_model_outputs.csv** - Contains summary output from each of the six total models
+
+## DATA PREP
+Load Packages
+```{r message=FALSE, warning=FALSE}
+library(tidyverse); library(ggpubr); library(broom); library(ggResidpanel)
+```
+
+Load Data
+```{r}
+load('RData/FL100_metagenome_Meta.RData')
+```
+
+## MICROBRIAL EVENESS
+VS TOTAL POLYPHENOL INTAKE
+```{r}
+evenness_totalintake = lm(mb_evenness ~ pp_daily_mg1000kcal + Age + BMI + Sex+
+                         fiber_g1000kcal+hei_asa24_totalscore, data = merge_313)
+
+evenness_totalintake_output = broom::tidy(evenness_totalintake) %>%
+    mutate(across(c(estimate:p.value), ~ round(.x, digits =3))) # round
+
+resid_panel(evenness_totalintake)
+```
+
+VS POLYPHENOL EVENNESS
+```{r}
+evenness_pp_evenness= lm(mb_evenness ~ pp_pielous + Age + BMI + Sex+ fiber_g1000kcal+hei_asa24_totalscore, data = merge_313)
+summary(evenness_pp_evenness)
+
+# Extract Model Output
+evenness_pp_evenness_output = broom::tidy(evenness_pp_evenness) %>%
+  mutate(across(c(estimate:p.value), ~ round(.x, digits =3))) # round
+
+resid_panel(evenness_pp_evenness)
+```
+
+VS POLYPHENOL DIVERSITY
+```{r}
+evenness_pp_richness = lm(mb_evenness ~ pp_sobs + Age + BMI + Sex+ fiber_g1000kcal+hei_asa24_totalscore, data = merge_313)
+summary(evenness_pp_richness)
+
+# Extract Model Output
+evenness_pp_richness_output = broom::tidy(evenness_pp_richness) %>%
+  mutate(across(c(estimate:p.value), ~ round(.x, digits =3))) # round
+
+resid_panel(evenness_pp_richness)
+```
+
+## MICROBRIAL RICHNESS
+VS TOTAL POLYPHENOL INTAKE
+```{r}
+richness_intake = lm(mb_sobs ~ pp_daily_mg1000kcal + Age + BMI + Sex+ 
+                           fiber_g1000kcal + hei_asa24_totalscore, data = merge_313) #%>% filter(pp_daily_mg1000kcal < 4000)
+
+richness_intake_output = broom::tidy(richness_intake) %>%
+    mutate(across(c(estimate:p.value), ~ round(.x, digits =3))) # round
+
+resid_panel(richness_intake)
+```
+
+VS POLYPHENOL RICHNESS
+```{r}
+richness_pp_richness = lm(mb_sobs ~ pp_sobs + Age + BMI + Sex+ fiber_g1000kcal + hei_asa24_totalscore, data = merge_313)
+  summary(richness_pp_richness)
+
+#Extract Model Output
+richness_pp_richness_output = broom::tidy(richness_pp_richness) %>%
+  mutate(across(c(estimate:p.value), ~ round(.x, digits =3)))
+
+resid_panel(richness_pp_richness)
+```
+
+VS POLYPHENOL EVENNESS
+```{r}
+richness_pp_evenness = lm(mb_sobs ~ pp_pielous + Age + BMI + Sex+ fiber_g1000kcal+hei_asa24_totalscore, data = merge_313)
+summary(richness_pp_evenness)
+
+# Extract Model Output
+richness_pp_eveness_output = broom::tidy(richness_pp_evenness) %>%
+  mutate(across(c(estimate:p.value), ~ round(.x, digits =3))) # round
+
+resid_panel(richness_pp_evenness)
+```
+
+
+## Save these files for additional plotting if necessary
+```{r}
+# Create a named list of all dataframes
+model_list = list(
+  mbevenness_totalintake_output = evenness_totalintake_output,
+  mbevenness_pp_evenness_output = evenness_pp_evenness_output,
+  mbevenness_pp_richness_output = evenness_pp_richness_output,
+  mbrichness_intake_output = richness_intake_output,
+  mbrichness_pp_richness_output = richness_pp_richness_output,
+  mbrichness_pp_eveness_output = richness_pp_eveness_output
+)
+
+# Combine into one dataframe with identifiers
+combined_models = bind_rows(model_list, .id = "model_name")
+
+write.csv(combined_models, 'output/FL100_alpha_diversity_model_outputs.csv', row.names = FALSE)
+```
+
+
+
+

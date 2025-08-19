@@ -1,0 +1,202 @@
+---
+title: "Participant Characteristics Table"
+author: "Stephanie Wilson"
+date: "August 2024"
+output: html_document
+---
+
+## Summary
+This code prepares the participant characteristics table (Table 1) for the polyphenol/microbiome manuscript. Scripts calculate the overall mean and standard error for continuous variables and the mean and standard error by polyphenol quartile. Frequency of males and females in the overall cohort and by quartile group are also compiled. 
+
+## Input
+  - **metadata_313.Rdata**: filtered for those with metagenomic and diet data (n=313), output from A0a_dietary_prep.R
+  
+## Output
+  - **FL100_MB_participant_table.csv** -content data for participant table, needs additional visual formatting
+  
+## Load packages and data
+Load Packages
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+```
+
+Load Metadata and Dietary Data
+```{r message = FALSE}
+load("RData/metadata_313.Rdata")
+
+# Specify variables of interest for the table
+continuous = c("Age", "BMI", "fiber_g1000kcal", "hei_asa24_totalscore", "ppintake_mg1000kcal", "waistavg_cm") # ,
+
+#unicode 
+plus_minus = "\u00B1"
+```
+
+## Overall summary
+
+Sex count, Coffee Count
+```{r}
+overall_sex = data.frame(table(cleaned_data$Sex)) %>%
+  pivot_wider(names_from = Var1, values_from = Freq) %>%
+  mutate(variable = "Female/Male") %>%
+  mutate(Overall = paste(Female, Male, sep = "/")) %>%
+  select(-c(Female, Male)) 
+
+overall_coffee = data.frame(table(cleaned_data$coffee_consumer)) %>%
+  pivot_wider(names_from = Var1, values_from = Freq) %>%
+  mutate(variable = "Coffee Consumer")  %>%
+  mutate(Overall = paste(yes, no, sep = "/")) %>%
+  select(-c(no, yes)) 
+```
+
+summary dataframe for 313 participants
+```{r}
+overall_summary = cleaned_data %>%
+  summarise(across(all_of(continuous), 
+                   list(mean = ~ mean(. , na.rm = TRUE), 
+                        se = ~ sd(. , na.rm = TRUE) / sqrt(n())))) %>%
+  pivot_longer(cols = everything(), 
+               names_to = c("variable", ".value"), 
+               names_pattern = "(.*)_(.*)") %>%
+  mutate(Overall = paste(round(mean, digits =1), 
+                         plus_minus, 
+                         round(se, digits =1))) %>%
+  select(-c(mean, se))
+```
+
+## BY Polyphenol Quartile
+
+Counts by Quartile
+```{r}
+subset = cleaned_data %>%
+     filter(pp_quartile_label %in% c("Low", "High"))
+
+quartile_sex = data.frame(table(subset$Sex, subset$pp_quartile_label)) %>%
+  pivot_wider(names_from = Var1, values_from = Freq) %>%
+  mutate(FMratio = paste(Female, Male, sep = "/")) %>%
+  select(-c(Female, Male)) %>%
+  t() %>%
+  as_tibble() %>%
+  mutate(variable = "Female/Male") %>%
+  rename(High = V1, Low = V2) %>%
+  slice(-1)
+
+quartile_coffee = data.frame(table(subset$coffee_consumer, subset$pp_quartile_label)) %>%
+  pivot_wider(names_from = Var1, values_from = Freq) %>%
+  mutate(yes_no = paste(yes, no, sep = "/")) %>%
+  select(-c(yes, no)) %>%
+  t() %>%
+  as_tibble() %>%
+  mutate(variable = "Coffee Consumer") %>%
+  rename(High = V1, Low = V2) %>%
+  slice(-1)
+```
+
+Generate quartile summary
+```{r}
+quartile_summary = cleaned_data %>%
+  filter(pp_quartile_label %in% c("Low", "High")) %>%
+  group_by(pp_quartile_label) %>%
+  summarise(across(all_of(continuous), 
+                   list(mean = ~ mean(. , na.rm = TRUE), 
+                        se = ~ sd(. , na.rm = TRUE) / sqrt(n())))) %>%
+    pivot_longer(cols = -pp_quartile_label, 
+               names_to = c("variable", ".value"), 
+               names_pattern = "(.+)_(.+)") %>%
+  mutate(overall = paste(round(mean, digits =1), 
+                         plus_minus, 
+                         round(se, digits =1))) %>%
+  select(-c(mean, se)) %>%
+  pivot_wider(names_from = pp_quartile_label, values_from = overall)
+```
+
+## Statistical Testing BY Polyphenol Quartile
+```{r}
+# Initialize an empty dataframe to store the t-test results
+t_test_results_df = data.frame(
+  variable = character(),
+  statistic = numeric(),
+  p = numeric(),
+  Mean_Low = numeric(),
+  Mean_High = numeric(),
+  stringsAsFactors = FALSE)
+
+# Loop through each continuous variable and perform a t-test
+for (var in continuous) {
+  
+  # Perform the t-test
+  t_test_result = t.test(subset[[var]] ~ subset$pp_quartile_label)
+  
+  # Extract the means for each group
+  means = subset %>%
+    group_by(pp_quartile_label) %>%
+    dplyr::summarize(mean_value = mean(get(var), na.rm = TRUE, .groups = 'drop'))
+  
+  mean_low = means %>% filter(pp_quartile_label == "Low") %>% pull(mean_value)
+  mean_high = means %>% filter(pp_quartile_label == "High") %>% pull(mean_value)
+  
+  # Add the results to the dataframe
+  t_test_results_df = rbind(t_test_results_df, data.frame(
+    variable = var,
+    statistic = t_test_result$statistic,
+    p = t_test_result$p.value,
+    Mean_Low = mean_low,
+    Mean_High = mean_high,
+    stringsAsFactors = FALSE))
+}
+```
+
+Statistics for count data
+```{r}
+contingency_table_sex = table(subset$pp_quartile_label, subset$Sex)
+contingency_table_coffee = table(subset$pp_quartile_label, subset$coffee_consumer)
+
+# Perform the chi-square test, sex
+chi_square_test_sex = chisq.test(contingency_table_sex)
+chi_sum_sex = data.frame(variable = 'Female/Male', 
+                        statistic = chi_square_test_sex$statistic,
+                        p = chi_square_test_sex$p.value, row.names = NULL)
+
+# Perform the chi-square test, coffee
+chi_square_test_coffee = chisq.test(contingency_table_coffee)
+chi_sum_coffee = data.frame(variable = 'Coffee Consumer', 
+                        statistic = chi_square_test_coffee$statistic,
+                        p = chi_square_test_coffee$p.value, row.names = NULL)
+
+chi_sum_merge = full_join(chi_sum_sex, chi_sum_coffee)
+```
+
+
+```{r}
+statistic_merge = full_join(chi_sum_merge, t_test_results_df) %>%
+  select(-c(Mean_Low, Mean_High)) %>%
+  mutate(statistic = round(statistic, digits =2))
+```
+
+
+## Merge Dataframes
+```{r}
+merge_sex = left_join(overall_sex, quartile_sex)
+merge_coffee = left_join(overall_coffee, quartile_coffee)
+merge_summary = left_join(overall_summary, quartile_summary) %>%
+  select(c(variable, Overall, Low, High))
+```
+
+Polish Column Names
+```{r}
+new_overall = paste("Overall (n = ", nrow(cleaned_data), ")", sep = "")
+new_high = paste("High (n = ", nrow(subset %>% filter(pp_quartile_label =="High")), ")", sep = "")
+new_low = paste("Low (n = ", nrow(subset %>% filter(pp_quartile_label =="Low")), ")", sep = "")
+```
+
+```{r}
+merge_final = full_join(merge_sex, merge_coffee) %>%
+  full_join(merge_summary) %>%
+  rename(!!new_overall := Overall,
+         !!new_high := High,
+         !!new_low := Low) %>%
+  left_join(statistic_merge)
+
+# Export
+write.csv(merge_final, 'output/FL100_MB_participant_table.csv', row.names = FALSE)
+```
+

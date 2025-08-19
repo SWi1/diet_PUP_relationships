@@ -76,8 +76,7 @@ Scripts in each set are intended to be run sequentially.
     -   C2c_PUP_Modelling_Summary.Rmd
     -   C3_PUP_Model_Comparisons.Rmd
     -   C4a_PUP_Taxonomy_Prevalence_PLOT.Rmd
-    -   C4b_PUP_Count_Modelling_PLOT.Rmd
-    -   C4c_PUP_Count_Modelling_class_PLOT.Rmd
+    -   C4b_PUP_Modelling_PLOT.Rmd
 
 4)  **Inflammation Modelling**. These scripts perform analyses related to lipopolysacharride binding protein (LBP). Linear models are first run to determine whether polyphenol intake alpha diversity predicts PUP gene alpha diversity and if PUP gene alpha diversity predicts LBP. Regarding machine learning models, hierarchical feature engineering is performed on PUP genes and PUP-containing microbes. Engineered features are combined with covariates and run in random forest machine learning models. Performance and SHAP plots are generated.
     -  D0_PUP_diversity_ML_prep.Rmd

@@ -1,0 +1,126 @@
+---
+title: "A2d_Substrate_ASA24_Match"
+author: "Stephanie Wilson"
+date: "September 2024"
+output: html_document
+---
+
+## SUMMARY
+This script takes content of new polyphenols (not in the original 3063) and maps this to FL100 dietary data. Resulting output is an RDS file that has polyphenol intake summarized at different levels (unaggregated, by recall, by subject).
+
+# INPUT
+
+-   **FL100_diet/ingredientized_asa_10-2022.csv** - Ingredientized FL100 ASA24
+-   **codematched_final.csv**: FL100 ASA to FooDB mapping key
+-   **FooDB_Content_Extracted_dbPUP_substrates.csv**\*
+
+# OUTPUT
+
+-   **FL100_FooDB_dbPUP_Substrate_Intakes.RDS**, 3 dataframes of FL100 polyphenol intakes (with new polyphenols) from:
+    1)  finest level unaggregated
+    2)  by recall
+    3)  by subject
+
+## LOAD PACKAGES AND DATA
+Load packages
+```{r}
+library(tidyverse); library(readxl)
+```
+
+Load Data
+```{r}
+content = read.csv('data/FooDB_Content_Extracted_dbPUP_substrates.csv') %>%
+  relocate(orig_content_avg_RFadj, .after =  orig_content_avg) %>%
+  rename(food_id = food_public_id)
+
+matched = read.csv('data/FL100_diet/codematched_final.csv') %>%
+  relocate('food_V2_ID', 'orig_food_common_name', 
+           .before = Ingredient_code) %>%
+  select(-Ingredient_description)
+
+#Ingredientized ASA
+ingredients = read.csv('data/FL100_diet/ingredientized_asa_10-2022.csv') %>%
+  select(-c(WWEIA.Category.description, UserID, EatWith, KCAL:D_CHEESE, 
+            Seq.num, PortionCode, Lang, RecallStatus))
+```
+
+### 1) Merge dietary recall data with FooDB matches
+
+```{r}
+ASA = left_join(ingredients, matched, by = 'Ingredient_code') %>%
+  relocate(Ingredient_code, Ingredient_description, food_id, food_V2_ID, 
+           orig_food_common_name, mean_score, .after = Food_Description) %>%
+  relocate(RecallNo, .after = UserName) %>%
+  select(-c(food_V2_ID, orig_food_id, fndds_description, 
+            IntakeStartDateTime, IntakeEndDateTime, RecallAttempt))
+
+## Merge FooDB-matched ASA Ingredient Codes with FooDB Polyphenol Content File.
+## Link between FooDB Polyphenol Content and ASA code-matched data is *food_id*.
+ASA_hits = ASA %>%
+  dplyr::left_join(content, by = 'food_id', relationship = 'many-to-many') %>%
+  # keep foods that only occur in our content file
+  filter(food_id %in% content$food_id)
+```
+
+```{r}
+# What do we have quantified
+ASA_hits_quant = ASA_hits %>%
+  filter(!is.na(orig_content_avg))
+
+# What is predicted but not quantified.
+ASA_hits_unquant = ASA_hits %>%
+  filter(is.na(orig_content_avg))
+```
+
+```{r}
+ASA_by_compound = ASA_hits_quant %>%
+  dplyr::mutate(
+    pp_consumed = case_when(
+      
+      # Whey Shakes (excluding chocolate whey shakes)
+      FoodCode == 95230000 ~ (orig_content_avg_RFadj * 0.01) * (Ingredient_consumed_g * 0.02),
+      
+      # Nectar Beverages
+      FoodCode == 64203020 ~ (orig_content_avg_RFadj * 0.01) * (Ingredient_consumed_g * 0.15),
+      FoodCode == 64204010 ~ (orig_content_avg_RFadj * 0.01) * (Ingredient_consumed_g * 0.20),
+      
+      # Tea Adjustment (only for 'DUKE' citation)
+      food_id %in% c(1021, 957, 38, 940, 849, 939, 517, 748) & citation == 'DUKE' ~ 
+        (orig_content_avg_RFadj * 0.01) * (Ingredient_consumed_g * (1/50)),
+
+      # Coffee Adjustment (only for 'DUKE' citation)
+      food_id %in% c(891, 60, 58, 59) & citation == 'DUKE' ~ 
+        (orig_content_avg_RFadj * 0.01) * (Ingredient_consumed_g * (10/180)),
+
+      # Default case: Standard calculation for all other cases
+      TRUE ~ (orig_content_avg_RFadj * 0.01) * Ingredient_consumed_g
+    )
+  )
+```
+
+### 2) Reformat into summary files
+
+```{r}
+ASA_by_recall = ASA_by_compound %>%
+  
+  # Sum by Recall and Participant
+  group_by(UserName, RecallNo) %>%
+  mutate(pp_recallsum = sum(pp_consumed, na.rm = TRUE)) %>%
+  ungroup() %>%
+  distinct(UserName, RecallNo, .keep_all = TRUE) 
+
+ASA_by_subject = ASA_by_recall %>%
+  
+  # Average by Participant
+  group_by(UserName) %>%
+  mutate(pp_average_mg = mean(pp_recallsum, na.rm = TRUE)) %>%
+  ungroup() %>%
+  distinct(UserName, .keep_all = TRUE) %>%
+  select(-c(RecallNo, pp_recallsum))
+```
+
+Save Data
+
+```{r}
+save(ASA_by_compound, ASA_by_recall, ASA_by_subject, file = 'RData/FL100_FooDB_dbPUP_Substrate_Intakes.RDS')
+```

@@ -1,0 +1,140 @@
+---
+title: "A2e Quantify FL100 Intakes at Class and Compound level"
+author: "Stephanie Wilson"
+date: "September 2024"
+output: html_document
+---
+
+## SUMMARY
+This script takes FL100 polyphenol intake data and specifically aggregates intake at the class and compound level by participant.
+
+## INPUT
+  - **FooDB_dbPUP_class_list.csv** - dbPUP substrate classes and all underlying substrates and polyphenols from our original set of 3063 polyphenols 
+  - **FL100_PP_Raw.csv** - FL100 Polyphenol Intakes of original 3063 set, by compound, food, recall, and subject
+  - **FL100_merged_variables.csv** - FL100 metadata variables
+  - **FL100_FooDB_dbPUP_Substrate_Intakes.RDS**, 3 dataframes showing FL100 polyphenol intakes of new polyphenols from 1) finest level unaggregated to 2) by recall, then 3) by subject
+  
+## OUTPUT
+  - **FL100_dbPUPsubstrate_class_intakes.csv** - FL100 intakes for dbPUP substrate classes, including broader class groupings using our original set of 3063 polyphenols, adjusted by caloric intake
+  - **FL100_dbPUPsubstrate_compound_intakes.csv** - FL100 polyphenol substrate intakes by compound, adjusted by caloric intake
+
+## LOAD packages and data
+Load packages
+```{r}
+library(tidyverse)
+```
+
+Load Data Files
+```{r}
+# Compounds and their classes
+class_list = read.csv('data/FooDB_dbPUP_class_list.csv') %>%
+  select(c(compound_public_id, class)) 
+
+# Load in Dietary Polyphenol Content, 
+# Raw is Each compound for each food in each recall by participant
+PP_Raw = read.csv('data/FL100_PP_Raw.csv') %>%
+  # REmove compound outliers
+  filter(!compound_name %in% c('Chinese tannin', 'alpha-Viniferin'))
+
+## New Substrate hits matched to ASA24
+load('RData/FL100_FooDB_dbPUP_Substrate_Intakes.RDS')
+
+# Load partcipant metadata for kcal
+kcal = read.csv('data/FL100_merged_variables.csv') %>%
+  select(c(UserName, avg_total_kcal))
+```
+
+## Combine substrate and PP_Raw Lists then Filter in relevant compounds
+```{r message = FALSE}
+# Remove extra columns
+ASA_by_recall_coltrim = ASA_by_recall %>%
+  select(intersect(names(ASA_by_recall), names(PP_Raw)))
+
+# Merge Files
+merged = full_join(PP_Raw, ASA_by_recall_coltrim) %>%
+  # There are two compounds that fit the bill for Rutin
+  filter(compound_public_id %in% c(class_list$compound_public_id, 'FDB002536'))%>%
+  # Let's Add those classes in
+  left_join(class_list, by = 'compound_public_id')
+```
+
+## Calculate Averge Polyphenol Class Intakes
+```{r}
+class_intakes = merged  %>%
+  
+  #Group by Taxonomic Class
+  group_by(UserName, RecallNo, class) %>%
+  
+  #gets the sum of each compound for each participant's recall
+  mutate(class_intake_mg = sum(pp_consumed, na.rm = TRUE)) %>% 
+  select(c(UserName, RecallNo, class, class_intake_mg)) %>%
+  ungroup()%>%
+  
+  #Remove duplicates since we've summed each polyphenol per recall
+  distinct(UserName, RecallNo, class, .keep_all = TRUE) %>%
+  
+  #Average polyphenol intake across recalls for each class
+  group_by(UserName, class) %>%
+  mutate(Avg_class_intake = mean(class_intake_mg)) %>%
+  ungroup() %>%
+  
+  #Remove duplicates
+  distinct(UserName, class, .keep_all = TRUE) %>%
+  select(c(UserName, class, Avg_class_intake)) %>%
+  filter(!is.na(class)) %>%
+  
+  # Add kcal data
+  left_join(kcal, by = 'UserName') %>%
+  mutate(class_intake_mg1000kcal = Avg_class_intake/(avg_total_kcal/1000)) %>%
+  
+  # Remove kcal and avg_class intake now that we have intake standardized to kcal
+  select(-c(Avg_class_intake, avg_total_kcal)) %>%
+  
+  #Transpose dataframe where each column is a participant
+  pivot_wider(id_cols = UserName, names_from = class, 
+              values_from = class_intake_mg1000kcal, values_fill = 0)
+```
+
+```{r}
+write.csv(class_intakes, 'output/FL100_dbPUPsubstrate_class_intakes.csv', row.names = FALSE)
+```
+
+## Calculate Averge Polyphenol Compound Intakes
+```{r}
+compound_intakes = merged  %>%
+  
+  #Group by Compound ID
+  group_by(UserName, RecallNo, compound_public_id) %>%
+  
+  #gets the sum of each compound for each participant's recall
+  mutate(compound_intake_mg = sum(pp_consumed, na.rm = TRUE)) %>% 
+  select(c(UserName, RecallNo, compound_public_id, compound_name, compound_intake_mg)) %>%
+  ungroup()%>%
+  
+  #Remove duplicates since we've summed each polyphenol per recall
+  distinct(UserName, RecallNo, compound_public_id, .keep_all = TRUE) %>%
+  
+  #Average polyphenol intake across recalls for each class
+  group_by(UserName, compound_public_id) %>%
+  mutate(Avg_compound_intake = mean(compound_intake_mg)) %>%
+  ungroup() %>%
+  
+  #Remove duplicates
+  distinct(UserName, compound_public_id, .keep_all = TRUE) %>%
+  select(c(UserName, compound_public_id, compound_name, Avg_compound_intake)) %>%
+  filter(!is.na(compound_public_id))  %>% 
+  # Add kcal data
+  left_join(kcal, by = 'UserName') %>%
+  mutate(compound_intake_mg1000kcal = Avg_compound_intake/(avg_total_kcal/1000)) %>%
+  
+  # Remove kcal and avg_class intake now that we have intake standardized to kcal
+  select(-c(Avg_compound_intake, avg_total_kcal)) %>%
+  
+  #Transpose dataframe where each column is a participant
+  pivot_wider(id_cols = UserName, names_from = compound_public_id, 
+              values_from = compound_intake_mg1000kcal, values_fill = 0)
+```
+
+```{r}
+write.csv(compound_intakes, 'output/FL100_dbPUPsubstrate_compound_intakes.csv', row.names = FALSE)
+```

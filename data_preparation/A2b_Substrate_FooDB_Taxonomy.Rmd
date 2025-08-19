@@ -1,0 +1,96 @@
+---
+title: "A2b_Substrates_FooDB_Taxonomy"
+author: "Stephanie Wilson"
+date: "September 2024"
+output: html_document
+---
+
+## SUMMARY
+This script merges the taxonomy of FooDB polyphenols into the PUP substrates file. Web scraping is performed for those polyphenols not already in our FooDB polyphenol taxonomy list (ie, phenolic compounds).
+
+## INPUT
+  - **FooDB_phenols_taxonomy.csv**, Previously web scraped taxonomy for our 3063 polyphenols
+  - **polyphenol_substrates_long.csv**, PUP substrates from dbPUP
+  - **dbPUP_substrates_FooDB_IDs.csv**, PUP substrates from dbPUP linked to their matching FooDB ID
+  
+## OUTPUT
+  - **polyphenol_substrates_long_FooDB_taxonomy.csv**, PUP substrates from dbPUP linked to their matching FooDB ID and taxonomy
+  - **polyphenol_substrates_need_comp_data.csv**, PUP substrates from dbPUP linked to their matching FooDB ID and taxonomy, **but there is no linked intake data**
+ 
+## LOAD PACKAGES AND DATA  
+Load packages
+```{r}
+library(tidyverse); library(rvest); library(xml2); library(stringr)
+source('functions/get_taxonomy.R')
+```
+
+Load Data
+```{r}
+substrates = read.csv('dbPUP/polyphenol_substrates_long.csv')
+substrates_FooDBmatch = read.csv('data/dbPUP_substrates_FooDB_IDs.csv') %>%
+  rename(compound_public_id = compound_code)
+tax = read.csv('data/FooDB_phenols_taxonomy.csv')
+```
+
+Add taxonomy to FooDB matches
+```{r}
+FooDB_matches_wtax = left_join(substrates_FooDBmatch, tax, by = "compound_public_id") %>%
+  # Remove those that were not detected in FooDB
+  filter(!decision == "no")
+```
+
+### WEB SCRAPE
+Some substrates had a match in FooDB but were *not* in our original polyphenol list of 3063 polyphenols. Let's isolate those and build the link.
+```{r}
+# Sme FoOD Compounds that need taxonomy searched
+tax_search_list = FooDB_matches_wtax %>%
+  filter(is.na(compound_name)) %>%
+  select(-c(compound_name:directparent)) %>%
+  mutate(compound_urls = paste0("https://foodb.ca/compounds/", compound_public_id))
+
+# We will need to pull food composition data from these compounds, so write the file
+write.csv(tax_search_list, 'data/polyphenol_substrates_need_comp_data.csv', row.names = FALSE)
+```
+
+Run taxonomy scrape function on list
+```{r}
+# Initialize a list to store the results
+taxonomy_results = list()
+
+# Loop through each URL in the compound_urls column
+for (i in 1:length(tax_search_list$compound_urls)) {
+  
+  # Apply the get_taxonomy function to each URL
+  result = get_taxonomy(tax_search_list$compound_urls[i])
+  
+  # Store the result in the list
+  taxonomy_results[[i]] = result
+}
+
+# Convert to a dataframe
+taxonomy_df = do.call(rbind, taxonomy_results) 
+taxonomy_hits = cbind(tax_search_list, taxonomy_df) %>%
+  select(-compound_urls)
+```
+
+### MERGE FILES
+Clean up our FooDB matches file
+```{r}
+FooDB_matches_final = FooDB_matches_wtax %>%
+  #Take out what we just searched 
+  filter(!compound_public_id %in% tax_search_list$compound_public_id) %>%
+  # Add new hits back in
+  full_join(taxonomy_hits)
+```
+
+ Combine our matches file with the substrates_long file 
+```{r}
+substrates_wtax = substrates %>%
+  left_join(FooDB_matches_final, by = "polyphenol", relationship ="many-to-many")
+```
+
+Save this output
+```{r}
+write.csv(substrates_wtax, 'dbPUP/polyphenol_substrates_long_FooDB_taxonomy.csv', row.names = FALSE)
+```
+

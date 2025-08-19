@@ -1,0 +1,148 @@
+---
+title: "Polyphenol Class Prep"
+author: "Stephanie Wilson"
+date: "September 2024"
+output: html_document
+---
+
+## SUMMARY
+This script finds other polyphenol compounds within our list of 3063 polyphenols that fall into polyphenolic classes listed in the dbPUP substrate file.
+
+## INPUT
+  - **polyphenol_substrates_long_FooDB_taxonomy.csv**, PUP substrates from dbPUP linked to their matching FooDB ID and taxonomy
+  - **PhenolExplorer_linkedto_FooDB.csv**, Phenol Explorer Polyphenols previously linked to their matching FooDB ID
+  - **FooDB_phenols_taxonomy.csv**, 3063 polyphenols in FooDB and their taxonomy
+
+## OUTPUT
+  - **FooDB_dbPUP_class_list.csv** - dbPUP substrate classes and all underlying substrates and polyphenols from our original set of 3063 polyphenols 
+
+## LOAD PACKAGES AND DATA
+packages
+```{r}
+library(tidyverse)
+```
+
+Data Files
+```{r}
+# FooDB linked dbPUP polyphenol substrates
+substrates = read.csv('dbPUP/polyphenol_substrates_long_FooDB_taxonomy.csv')
+
+# Phenol Explorer polyphenols linked to their FooDB equivalent
+PE_FooDB_links = read.csv('data/PhenolExplorer_linkedto_FooDB.csv')
+
+# FooDB polyphenol taxonomy
+foodb = read.csv('data/FooDB_phenols_taxonomy.csv')
+```
+
+Combine substrate list with existing polyphenol list
+```{r message = FALSE}
+full_list = substrates %>%
+  distinct(compound_public_id, .keep_all = TRUE) %>%
+  select(c(compound_public_id:directparent)) %>%
+  mutate(addition = "new") %>%
+  full_join(foodb) %>%
+  filter(!is.na(compound_public_id)) %>%
+  mutate(addition = ifelse(is.na(addition), 'old', addition))
+```
+
+### Identify Compound Classes and identify a search strategy 
+
+The subclasses we need to match
+```{r}
+substrates %>% distinct(subclass) %>% pull()
+```
+
+Search Strategy
+1) Pull compounds for each class in dbPUP substrate 
+2) Pull compounds for each class in Phenol Explorer-FooDB Matched File
+3) Pull compounds using a taxonomy level search in FooDB
+
+dbPUP subclass, FooDB Taxonomy Level
+  - Isoflavonoids as klass
+  - Flavones as subklass
+  - Chalcones and dihydrochalcones combined as subklass
+  - Flavanols (aka flavan-3-ols) is there as direct parent
+  - Flavanones not there, considered a flavan subkclass
+  - Flavonols exist as direct parent
+  - Stilbenes, exists as klass
+  - Curcuminoids, only one compound
+  
+
+### Perform Search
+```{r}
+isoflavonoids = full_list %>%
+  filter(compound_public_id %in% substrates$compound_public_id[substrates$subclass == 'Isoflavonoids'] | 
+         compound_public_id %in% PE_FooDB_links$compound_public_id[PE_FooDB_links$subklass == 'Isoflavonoids'] |
+         grepl(klass, pattern ='Isoflavonoids', ignore.case = TRUE) & 
+         !grepl('Homoisoflavonoids', klass, ignore.case = TRUE)) %>%
+  mutate(class = 'Isoflavonoids') 
+
+flavones = full_list %>%
+  filter(compound_public_id %in% substrates$compound_public_id[substrates$subclass == 'Flavones'] |
+      compound_public_id %in% PE_FooDB_links$compound_public_id[PE_FooDB_links$subklass == 'Flavones'] |
+      grepl(subklass, pattern = 'Flavones', ignore.case = TRUE)) %>%
+  mutate(class = 'Flavones')
+  
+chalcones_dihydrochalcones = full_list %>%
+  filter(compound_public_id %in% substrates$compound_public_id[substrates$subclass == 'Chalcones']|
+           compound_public_id %in% PE_FooDB_links$compound_public_id[PE_FooDB_links$subklass 
+                                                                     %in% c('Chalcones', "Dihydrochalcones")] |
+           grepl(subklass, pattern ='Chalcones', ignore.case = TRUE)) %>%
+  mutate(class = 'Chalcones_Dihydrochalcones')
+
+flavanols = full_list %>%
+  filter(compound_public_id %in% substrates$compound_public_id[substrates$subclass == 'Flavanols']|
+         compound_public_id %in% PE_FooDB_links$compound_public_id[PE_FooDB_links$subklass == 'Flavonols'] |
+           grepl(directparent, pattern ='flavan-3-ols', ignore.case = TRUE)) %>%
+  mutate(class = 'Flavanols_aka_flavan3ols')
+
+flavanones = full_list %>%
+  filter(compound_public_id %in% substrates$compound_public_id[substrates$subclass == 'Flavanones']|
+         compound_public_id %in% PE_FooDB_links$compound_public_id[PE_FooDB_links$subklass == 'Flavanones'] |
+         grepl('Flavanones', directparent, ignore.case = TRUE) & 
+         !grepl('isoflavanones', directparent, ignore.case = TRUE)) %>%
+  mutate(class = 'Flavanones')
+
+flavonols = full_list %>%
+  filter(compound_public_id %in% substrates$compound_public_id[substrates$subclass == 'Flavonols']|
+         compound_public_id %in% PE_FooDB_links$compound_public_id[PE_FooDB_links$subklass == 'Flavonols'] |
+           grepl(directparent, pattern ='flavonols', ignore.case = TRUE)) %>%
+  mutate(class = 'Flavonols')
+
+stilbenes = full_list %>%
+  filter(compound_public_id %in% substrates$compound_public_id[substrates$subclass == 'Stilbenes']|
+         compound_public_id %in% PE_FooDB_links$compound_public_id[PE_FooDB_links$subklass == 'Stilbenes'] |
+           grepl(klass, pattern ='stilbenes', ignore.case = TRUE)) %>%
+  mutate(class = 'Stilbenes')
+
+curcuminoids = full_list %>%
+  filter(compound_public_id %in% substrates$compound_public_id[substrates$subclass == 'Curcuminoids']|
+         compound_public_id %in% PE_FooDB_links$compound_public_id[PE_FooDB_links$subklass == 'Curcuminoids'] |
+           grepl(directparent, pattern = 'curcuminoids', ignore.case = TRUE)) %>%
+  mutate(class = 'Curcuminoids')
+```
+
+Merge search hit dataframes
+```{r}
+taxonomy_search = bind_rows(isoflavonoids, flavones, flavanones, chalcones_dihydrochalcones,
+                            flavanols, flavonols, stilbenes)
+
+# Check for any duplicates
+duplicate_keep = taxonomy_search %>%
+  group_by(compound_public_id) %>%  # Group to identify duplicate rows
+  filter(n() > 1) %>%
+  filter(class == 'Flavonols')
+
+taxonomy_search_cleaned = taxonomy_search %>%
+  # Remove duplicates
+  filter(!compound_public_id %in% duplicate_keep$compound_public_id) %>%
+  # Add final decision on duplicates
+  full_join(duplicate_keep)
+```
+
+Write File
+```{r}
+write.csv(taxonomy_search_cleaned, 'data/FooDB_dbPUP_class_list.csv', row.names = FALSE)
+```
+
+

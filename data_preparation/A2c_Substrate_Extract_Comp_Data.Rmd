@@ -1,0 +1,207 @@
+---
+title: "A2c_Substrates_FooDB_Taxonomy"
+author: "Stephanie Wilson"
+date: "January 2025"
+output: html_document
+---
+
+## SUMMARY
+This script pulls out composition information for new polyphenols that were not originally in our list of 3063 polyphenols. 
+
+## INPUT
+  - **polyphenol_substrates_need_comp_data.csv**, PUP substrates from dbPUP linked to their matching FooDB ID and taxonomy, **but there is no linked intake data based off our previous run of 3063 polyphenols**
+  - **Compound.csv.bz2** - FooDB Compound Data
+  - **Content_updated.csv.bz2"** - FooDB Content Data
+  - **Food_updated.csv** - FooDB Food Data
+  - **FL100_Duke_Filtering_Codes.csv** - Duke Codes to filter out as they are not commonly eaten food parts.
+  - **PhenolExplorer-RFTable_20190204.xlsx** - Phenol Explorer Retention Factors
+  - **yogurt_soy_correction.csv** - certain yogurt was incorrectly coded to soy milk vs cow's milk
+  
+  
+## OUTPUT
+  - **polyphenol_substrates_need_comp_data_webscrape.csv** - substrates marked for food composition web scraping
+  - **FooDB_Content_Extracted_dbPUP_substrates.csv**, 5 additional polyphenols not included in our original list of 3063. PUP substrates from dbPUP linked to FooDB ID, taxonomy, and food concentrations
+  
+## LOAD PACKAGES AND DATA
+Load packages
+```{r}
+library(tidyverse); library(readxl)
+```
+
+Load Data
+```{r}
+search_list = read.csv('data/polyphenol_substrates_need_comp_data.csv')
+
+# FooDB, Accessed September 2022
+Compound = read.csv('data/Compound.csv.bz2') %>%
+   rename('smiles' = 'cas_number',
+         'inchi' = 'moldb_inchikey',
+         'mono_mass' = 'moldb_inchi',
+         'inchikey' = 'moldb_smiles') %>%
+  select(-c(moldb_iupac, state, annotation_quality, description))
+
+Content = read.csv('data/Content_updated.csv.bz2', header=TRUE) %>% 
+  filter(source_type == 'Compound') %>%
+  select(-c('source_type', 'creator_id', 'updater_id', 'orig_citation',
+            'created_at', 'updated_at', 'orig_method', 'orig_unit_expression', 
+            'citation_type'))  %>%
+  filter(!food_id ==632) # remove milk
+
+Food = read.csv('data/Food_updated.csv') %>%
+  select(c('id', 'name')) %>%
+  rename('food_name' = 'name',
+         'food_id' = 'id')
+
+duke_filters = read.csv('data/FL100_Duke_Filtering_Codes.csv') %>%
+  rename('orig_food_part' = 2) %>%
+  mutate(keep = 'keep')
+
+# Retention Factor 
+rf = read_xlsx('data/PhenolExplorer-RFTable_20190204.xlsx', sheet = 1) %>%
+  dplyr::rename('orig_source_id' = 'compound_id') %>%
+  mutate(food_name = str_to_lower(food_name),
+         food_name = gsub("[[:punct:][:blank:]]+", " ", food_name)) %>%
+  rename(orig_food_id = food_id)
+```
+
+Load file corrections
+```{r}
+Compound_ids = Compound %>%
+  select(id, public_id) %>%
+  rename(compound_public_id = public_id,
+        source_id = id)
+
+# Milk Corrections
+Milk = read.csv('data/milk_scrape_polyphenols.csv') %>%
+  rename('compound_public_id' = 1,
+         'compound_name' = 2,
+         'orig_min' = 'low_end',
+         'orig_max' = 'high_end',
+         'orig_content' = 'Average',
+         'orig_unit' = 'units') %>%
+  left_join(Compound_ids) %>%
+  select(c(source_id, compound_public_id, compound_name, orig_min, orig_max,
+           orig_content, orig_unit, citation)) %>%
+  mutate(source_type = 'Compounds', 
+         food_id = 632,
+         food_name = 'Milk (Cow)',
+         food_public_id = 'FOOD00618')
+  
+# Yogurt Corrections - It was found during in the polyphenol estimation pipeline that yogurt polyphenols were overestimated because there soy products were included with whole milk yogurt
+yogurt_fix = read.csv('data/yogurt_soy_correction.csv')
+```
+
+### 1) Isolate Compounds of Interest
+Filter out compounds of interest (id = from Content) using key link between Compound and Content files
+```{r}
+# Match FDB#### to Content ID
+hits = Compound %>% 
+  filter(public_id %in% c(search_list$compound_public_id, "FDB002536")) %>%
+  select(c(id, public_id, name)) %>%
+  rename(compound_public_id = public_id,
+         compound_name = name,
+         source_id = id)
+
+# Pull Content
+hits_content = Content %>%
+  # Remove soy yogurt entries
+  filter(!id %in% yogurt_fix$id) %>%
+  # Remove milk entries which needed corrections
+  filter(!food_id == 632) %>%
+  # Add in correct milk content 
+  full_join(Milk) %>% 
+  # filter compounds that match our list.
+  filter(source_id %in% hits$source_id) %>%
+  select(-c(compound_public_id:food_public_id)) %>%
+  left_join(hits, by = 'source_id') %>%
+  relocate(compound_public_id, compound_name, .after = id) %>%
+  left_join(Food, by = "food_id") %>%
+  relocate(food_name, .after = food_id) %>%
+  rename(food_public_id = food_id)
+```
+
+What do we not have content information for?
+```{r}
+missing = search_list %>%
+  filter(!compound_public_id %in% hits_content$compound_public_id)
+
+# We will find these later. Let's focus on what we have.
+write.csv(missing, 'data/polyphenol_substrates_need_comp_data_webscrape.csv', row.names = FALSE)
+```
+
+### 2) Adjust Duke Entries
+```{r}
+hits_content_duke = hits_content %>%
+  # Extract DUKE entries
+  filter(citation == 'DUKE') %>%
+  # filter in commonly eaten food parts that are present in the database
+  semi_join(duke_filters, by = c("food_public_id" ="food_id", "orig_food_part"))
+```
+
+Replace DUKE entries with updated ones
+```{r message = FALSE, echo = FALSE}
+hits_content_V2 = hits_content %>%
+  # Remove old DUKE entries
+  filter(!citation == 'DUKE') %>%
+  # Add new ones
+  full_join(hits_content_duke)
+```
+
+### 3) Check if we have to apply Phenol Explorer retention factors
+```{r}
+# Extract PE Entries
+hits_content_V2_RF = hits_content_V2 %>%
+  filter(citation == 'PHENOL EXPLORER') 
+
+# What RF link to our foods of interest?
+RF_matches = rf %>%
+  filter(orig_food_id %in% hits_content_V2_RF$orig_food_id) %>%
+  select(c(orig_food_id, orig_source_id, mean_rf)) %>%
+  mutate(orig_source_id = as.character(orig_source_id),
+         # Soy burger in the FooDB file is actually 963
+         orig_food_id = as.character(ifelse(orig_food_id == 954, 963, orig_food_id)))
+
+#RF needs applied to soy products.
+hits_content_V3 = hits_content_V2 %>%
+  left_join(RF_matches, by = c('orig_food_id','orig_source_id')) %>%
+  select(-orig_food_common_name)
+```
+
+
+### Unit Note: orig_content is presented in mg/100 g though the original unit for some is in mg/1000 g
+
+
+### 4) Aggregate
+**Aggregation for the FooDB polyphenol content**. Create average original content column to replicate values observed on [FooDB.ca](www.foodb.ca). 
+  - *Note* - This action also moves up from the ingredient level to a broader food classification and  removes individual entries that went into the average.
+
+```{r}
+#Merge with unit file
+hits_aggregated = hits_content_V3 %>%
+  
+  group_by(food_public_id, compound_public_id) %>%
+  mutate(orig_content_avg = mean(orig_content, na.rm = TRUE)) %>%
+  ungroup() %>%
+  distinct(food_public_id, compound_public_id, .keep_all = TRUE) %>%
+  relocate(orig_content_avg, .before = orig_unit) %>% 
+  relocate(food_public_id, .before = food_name) %>%
+  arrange(food_public_id, compound_public_id) %>%
+  #Removes ind. entries
+  select(-c(orig_food_id, orig_food_part, orig_content, 
+            standard_content, export)) %>%
+  mutate(orig_content_avg_RFadj = ifelse(is.na(mean_rf), 
+                                         orig_content_avg, orig_content_avg 
+                                         *mean_rf)) %>%
+  relocate(mean_rf, orig_content_avg_RFadj, .after =  orig_content_avg) %>%
+  mutate(across(c(orig_content_avg, orig_content_avg_RFadj), ~ ifelse(is.nan(.), NA, .)))
+```
+
+Write final content file to merge with ASA24 data
+```{r}
+write.csv(hits_aggregated, 'data/FooDB_Content_Extracted_dbPUP_substrates.csv', row.names = FALSE)
+
+# What quantified compounds did we add that we didn't already have
+hits_aggregated %>% filter(orig_content_avg_RFadj>0) %>% distinct(compound_name)
+```
+
+

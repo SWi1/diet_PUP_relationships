@@ -1,0 +1,87 @@
+---
+title: "Alpha_diversity_prep"
+author: "Stephanie Wilson"
+date: "February 2024"
+output: html_document
+---
+
+## SUMMARY
+This script calculates alpha diversity for polyphenol intake, merges it with microbial metagenomic data, and creates a new metadata file.
+
+## INPUTS
+  - **FL100_polyphenol_compound_intake.RData** - polyphenol compound intake (n = 350)
+  - **species_313.Rdata** - abundance + taxonomy data (n = 313)
+  - **metaphlan_faith_pd.csv** - FL100 phylogenetic diversity from Andrew
+
+## OUTPUTS
+  - **FL100_metagenome_Meta.RData** - metadata + metagenomic and polyphenol alpha diversity metrics
+
+## PREP DATA  
+Load Packages
+```{r message=FALSE, warning=FALSE}
+library(tidyverse); library(bestNormalize); library(devtools); library(vegan); library(effects); library(ggpubr); library(broom); library(jtools)
+```
+
+Load data
+```{r}
+# polyphenol compound intake data
+load(file = "FL100_diet_prep/output/FL100_polyphenol_compound_intake.RData")
+
+shotgun_faith = read.csv("data/metaphlan_faith_pd.csv") %>%
+  rename("UserName" = "subject_id")
+
+#metadata files
+load(file = "RData/species_313.RData")
+load(file = "RData/metadata_313.RData")
+```
+
+
+## Calculation of Compound Alpha Diversity
+```{r} 
+ppalpha = compound_long %>%
+  group_by(UserName) %>%
+  summarize(pp_sobs = vegan::specnumber(compound_mg1000kcal), # number of unique polyphenols
+            pp_shannon = vegan::diversity(compound_mg1000kcal, index = "shannon"),
+            pp_simpson = vegan::diversity(compound_mg1000kcal, index = "simpson"),
+            pp_invsimpson = 1/pp_simpson,
+            pp_pielous = pp_shannon/log(pp_sobs),
+            pp_daily_mg1000kcal = sum (compound_mg1000kcal)) 
+```
+
+
+## Load metagenomic species data and metadata
+```{r}
+metadata_313 = cleaned_data
+metagenome = as.data.frame(t(abundance_313))
+  metadata_313$mb_sobs = specnumber(metagenome)
+  metadata_313$mb_shannon = vegan::diversity(metagenome, index = "shannon")
+  metadata_313$mb_evenness = metadata_313$mb_shannon/(log(metadata_313$mb_sobs))
+```
+
+Merge dataframes
+```{r}
+merge_313 = metadata_313 %>%
+  left_join(ppalpha) %>%
+  left_join(shotgun_faith)
+
+save(merge_313, file = 'RData/FL100_metagenome_Meta.RData')
+```
+
+## Exploratory
+```{r}
+ppalpha %>%
+  pivot_longer(cols = c(pp_sobs, pp_shannon, pp_simpson, pp_invsimpson), names_to = "metric") %>%
+  ggplot(aes(x = pp_daily_mg1000kcal, y = value)) + 
+  geom_point() + 
+  geom_smooth() + 
+  facet_wrap(~ metric, ncol =4, scales = "free_y")
+```
+
+Polyphenol Diversity Histograms
+```{r}
+par(mfrow=c(2,2))
+hist(merge$pp_sobs)
+hist(merge$pp_simpson)
+hist(merge$pp_invsimpson)
+```
+

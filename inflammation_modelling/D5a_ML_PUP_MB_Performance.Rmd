@@ -1,0 +1,117 @@
+---
+title: "Performance Metrics for PUP-MB Random Forest Models"
+author: "Stephanie Wilson"
+date: "July 2025"
+output: html_document
+---
+
+## SUMMARY
+This script pools ML output from across dietML output RDS files, which contain numerous dataframes relevant to the model including performance and SHAP values. For models on PUP-containing microbes, this script:
+
+1) Isolates the pathways for each of the RDS files created by one run of dietML
+2) Extracts performance metrics from each random forest model
+
+## INPUT
+- *dietML RDS files* - from dietML output
+  
+## OUTPUT
+- *ML_LBP_PUP_MB_performance_metrics.csv*
+- *ML_LBP_PUP_MB_Seed_Performance.png* - Performance across seeds
+- *ML_LBP_PUP_MB_Avg_Performance.png* - Change from Null for best seed
+
+## PREP
+```{r LOAD PACKAGES, message=FALSE}
+library(tidyverse)
+```
+
+Load Functions
+```{r}
+source('functions/find_rds.R')
+source('functions/extract_performance_metrics.R')
+```
+
+### 1) Extract Path Information
+
+Get the paths of all rds files
+```{r}
+rds_files = find_rds_files('taxaHFE_PUP_MB/')
+rds_info = tibble(
+  path = rds_files,
+  # Extract seed number
+  seed = str_extract_all(path, "\\d+"))%>%
+  rename(path = 1,
+         seed = 2) %>%
+  slice(-1)
+```
+
+### 2) Performance metrics
+```{r warning = FALSE}
+all_metrics = map_dfr(rds_info$path, ~extract_performance(.x, rds_info)) %>%
+  pivot_longer(
+    cols = c(estimate, estimate_null),
+    names_to = "model",
+    values_to = "estimate"
+  ) %>%
+  mutate(
+    model = if_else(model == "estimate", "test", "null")
+  )
+
+#Export
+write.csv(all_metrics, 'output/ML_LBP_PUP_MB_performance_metrics.csv', row.names = FALSE)
+```
+
+
+## PLOT PERFORMANCE METRICS
+```{r}
+delta_metrics = all_metrics %>%
+  pivot_wider(names_from = model, values_from = estimate) %>%
+  filter(!is.na(test), !is.na(null), null != 0) %>%  # avoid divide by zero
+  mutate(
+    percent_change = (test - null) / null * 100)
+
+summary_delta = delta_metrics %>%
+  group_by(metric) %>%
+  summarise(
+    mean_change = mean(percent_change, na.rm = TRUE),
+    ci_low = t.test(percent_change)$conf.int[1],
+    ci_high = t.test(percent_change)$conf.int[2],
+    .groups = "drop")
+```
+
+### By seed
+```{r}
+seed_plot = ggplot(delta_metrics, aes(x = factor(seed), y = percent_change)) +
+  geom_point(size = 3, alpha = 0.8) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  facet_wrap(~ metric, scales = "free_y") +
+  labs(
+    title = "Percent Change (Test vs Null)",
+    x = "Seed",
+    y = "Percent Change (%)",
+    color = "Metric") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+seed_plot
+ggsave(plot = seed_plot, filename = 'images/ML_LBP_PUP_MB_Seed_Performance.png', units = "in", dpi =300, height = 4, width = 6.5)
+```
+
+Seed 527 was the best performing over the null model.
+
+### Average and 95% CI
+```{r}
+ci_plot = ggplot(summary_delta, aes(x = metric, y = mean_change)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = ci_low, ymax = ci_high), width = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
+  labs(
+    x = "Metric",
+    y = "Change from Null (%)") +
+  theme_bw()
+
+saveRDS(ci_plot, "images/ML_LBP_PUP_MB_Avg_Performance.rds")
+ggsave(plot = ci_plot, filename = 'images/ML_LBP_PUP_MB_Avg_Performance.png', units = "in", dpi =300, height = 4, width = 6.5)
+```
+
+
+ 

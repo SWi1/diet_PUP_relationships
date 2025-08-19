@@ -1,0 +1,95 @@
+---
+title: "SHAP Plot for best PUP Gene Random Forest Model"
+author: "Stephanie Wilson"
+date: "July 2025"
+output: html_document
+---
+
+## SUMMARY
+This script creates a publication ready SHAP plot for the best performing ML model predicting LBP with microbial PUP genes.
+
+## INPUT
+- **dbpup_overview_clean.csv** - dbPUP gene classificiations
+- **ML_r_workspace.rds** - packaged results from random forest model. 
+
+## OUTPUT
+- **ML_LBP_PUP_SHAP.png**
+- **ML_LBP_PUP_SHAP.rds**, image components to be combined with the other best model.
+
+## DATA PREP
+```{r}
+library(tidyverse)
+```
+
+```{r}
+# Load PUP information
+dbpup = read.csv('dbPUP/dbpup_overview_clean.csv')
+```
+
+## Establish key for formatting SHAP plot feature names
+```{r}
+covariates = tibble(
+  feature = c("age", "sex_male", "bmi", "fiber_g1000kcal", "hei_asa24_totalscore"),
+  feature_publish = c("Age", "Sex, Male", "BMI", "Fiber (g/1000 kcal)", "Total HEI Score"))
+
+## Load dbpup classifications
+feature_list = dbpup %>%
+  select(class, Family.Number, gene, Name) %>%
+  pivot_longer(cols = c(class, Family.Number, gene),
+               names_to = "variable",
+               values_to = "value") %>%
+  mutate(Name = if_else(variable == "gene", Name, NA_character_),
+         value = if_else(variable == "class",
+                         str_to_sentence(str_replace_all(value, "_", " ")),
+                         value),
+         # Format feature names with UniProt Number
+         feature_publish = case_when(
+            variable == "gene" ~ paste(Name, " (", value, ")", sep = ""),
+            variable == "class" ~ paste(value, sep = ""),
+            variable == "Family.Number" ~ paste(value, sep = "")),
+         # Allow long feature names to go on multiple lines
+         feature_publish = ifelse(
+            str_length(feature_publish) > 20,
+            str_wrap(feature_publish, width = 20),
+            feature_publish),
+         # Add in formatting to pair with what is present in dietML data
+         feature = case_when(
+            variable == "gene" ~ paste("g_", str_to_lower(value), sep = ""),
+            variable == "class" ~ paste("c_", str_to_lower(value), sep = ""),
+            variable == "Family.Number" ~ paste("f_", str_to_lower(value), sep = ""))) %>%
+  select(feature, feature_publish) %>%
+  full_join(covariates) 
+```
+
+## Create SHAP Plot
+```{r}
+# Path to best performing seed
+bestmodel = "taxaHFE_PUP/dietML/output/ml_results_seed_527/ML_r_workspace.rds"  
+loaded_env = load(bestmodel)
+  
+  # Extract the data with SHAP values, match to formatted names
+  sv_data = data.frame(feature = colnames(sv_full[[2]])) %>%
+    left_join(feature_list, by = 'feature') %>%
+    distinct(feature, feature_publish)
+  
+  # Update the column names with formatted names
+  colnames(sv_full$X) = sv_data$feature_publish
+  colnames(sv_full$S) = sv_data$feature_publish
+  
+  # Create the beeswarm plot
+  pup_plot = shapviz::sv_importance(sv_full, kind = "bee", show_numbers = TRUE,
+                                bee_width = 0.2,  max_display = 5, 
+                                show_other = FALSE) + 
+    theme_bw(base_size = 11) + 
+    labs(x = '') + 
+    theme(plot.margin = margin(0, 0, 0, 0, "cm"))
+```
+
+Export Plot
+```{r}
+saveRDS(pup_plot, "images/ML_LBP_PUP_SHAP.rds") # For combining with other ML plot
+ggsave(plot = pup_plot, filename = "images/ML_LBP_PUP_SHAP.png", 
+       units = "in", height = 6, width = 8, dpi = 300)
+```
+
+

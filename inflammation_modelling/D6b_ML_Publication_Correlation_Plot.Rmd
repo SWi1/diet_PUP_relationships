@@ -1,0 +1,143 @@
+---
+title: "ML_Correlations"
+author: "Stephanie Wilson"
+date: "August 2025"
+output: html_document
+---
+
+# SUMMARY
+This script plots the relationships between top ML model features and LBP.
+
+## INPUT
+  - **df_matrix.csv** - Input into PUP ML model
+  - **full_data.csv** - Input into PUP-MB ML model
+  - **ML_r_workspace.rds** - 2 files representing ML outputs from seed 527
+
+## OUTPUT
+  - **ML_correlations.png** - supplementary figure to go with ML SHAP plots
+
+## DATA PREP  
+Load packages
+```{r}
+library(tidyverse)
+```
+
+Load Data
+```{r}
+pup_feautures = read.csv("taxaHFE_PUP/dietML/df_matrix.csv")
+mb_features = read.csv("taxaHFE_PUP_MB/full_data.csv")
+
+# Merge Features
+ml_features = left_join(pup_feautures, mb_features)
+```
+
+## Pull out original data from top 5 features from PUP and PUP-MB models
+We will use these to filter our data.
+```{r message = FALSE, warning = FALSE}
+load("taxaHFE_PUP_MB/output_seed_527/ML_r_workspace.rds")
+mb_features_527 = data.frame(feature = colnames(sv_full[[2]]))%>%
+  # Pull out top 5, based on shap plots
+  slice(1,5,6,10,11)%>%
+  pull(feature)
+
+load("taxaHFE_PUP/dietML/output/ml_results_seed_527/ML_r_workspace.rds")
+pup_features_527 = data.frame(feature = colnames(sv_full[[2]])) %>%
+   # Pull out top 5, based on shap plots
+  slice(2, 3, 5, 13, 14) %>%
+  pull(feature)
+```
+
+Subset data
+```{r}
+pup_top5 = ml_features %>%
+  select(c(feature_of_interest, "sex", any_of(pup_features_527)))
+
+pup_mb_top5 = ml_features %>%
+  select(c(feature_of_interest, "sex", any_of(mb_features_527)))
+
+top5_features_both = full_join(pup_mb_top5, pup_top5)
+```
+
+## Spearman correlations with LBP
+```{r}
+# Format to long
+long_data = top5_features_both %>%
+  select(-sex) %>%  # exclude sex
+  pivot_longer(cols = -feature_of_interest, names_to = "variable", values_to = "value")
+
+# Calculate correlations and create label with correct positioning.
+cor_labels = long_data %>%
+  group_by(variable) %>%
+  summarise(
+    test = list(cor.test(value, feature_of_interest, method = "spearman")),
+    y_pos = max(feature_of_interest, na.rm = TRUE) * 1.1,
+    .groups = "drop") %>%
+  mutate(
+    spearman_rho = map_dbl(test, ~ signif(.x$estimate, 2)),
+    p_value = map_dbl(test, ~ .x$p.value),
+    p_label = ifelse(p_value < 0.001, "< 0.001", signif(p_value, 2)),
+    label = paste0("ρ = ", spearman_rho, ", p = ", p_label)) %>%
+  select(variable, y_pos, label)
+```
+
+## Scatterplots - Continuous Variables
+Create more informative labels
+```{r}
+facet_labels = c(
+  bmi = "BMI~(kg/m^2)",
+  fiber_g1000kcal = "Fiber~(g/1000~kcal)",
+  hei_asa24_totalscore = "Total~HEI~Score",
+  g_a1s0b1 = "Glycoside~hydrolase~(A1S0B1)~count",
+  g_ruthenibacterium = "italic('Ruthenibacterium')~Abundance",
+  g_lachnospiraceae_unclassified = "italic('Lachnospiraceae')~'unc.'~Abundance")
+```
+
+Create Scatterplots
+```{r}
+correlation_plots= ggplot(long_data, aes(x = value, y = feature_of_interest)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  facet_wrap(~variable, scales = "free_x", 
+             labeller = labeller(variable = facet_labels, .default = label_parsed)) +
+  geom_text(
+    data = cor_labels,
+    aes(x = -Inf, y = y_pos, label = label),
+    hjust = -0.1,
+    inherit.aes = FALSE,
+    size = 3) +
+  labs(
+    x = NULL,
+    y = "Plasma LBP (µg/mL)") +
+  theme_bw() +
+  theme(
+    axis.title.y = element_text(angle = 90, hjust =0))
+```
+
+## Barplot - Factor Variables
+```{r}
+factor_plot = ggplot(pup_top5, aes(x = sex, y = feature_of_interest)) +
+  geom_violin(scale ="width", fill = "gray80") +
+  geom_jitter(width = 0.1, alpha = 0.6, color = "black") +
+  stat_summary(fun = mean, geom = "point", shape = 23, size = 3, fill = "red") +
+  stat_compare_means(method = "wilcox.test", 
+                     label.y = max(pup_top5$feature_of_interest, na.rm = TRUE)*1.1,
+                     label.x = "Female",
+                     size =3) +
+  ylim(0, 45) +
+  labs(x = NULL, y = NULL) +
+  theme_bw()
+factor_plot
+```
+
+## Combine Plots
+```{r}
+# Create a narrower version of factor_plot by combining with spacers
+narrow_factor_plot =  factor_plot + plot_spacer() +plot_spacer()+
+  plot_layout(ncol = 3, widths = c(1, 1, 1))
+
+combined_plot = correlation_plots / narrow_factor_plot + plot_layout(heights = c(2.5, 1))
+combined_plot
+
+ggsave(combined_plot, file = 'images/ML_correlations.png', dpi = 300, width = 7.5, height = 6.5, units = "in")
+```
+

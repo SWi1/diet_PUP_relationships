@@ -1,0 +1,42 @@
+---
+title: "ML_Publication_Plot"
+author: "Stephanie Wilson"
+date: "August 2025"
+output: html_document
+---
+
+## SUMMARY
+This simple script combines individual SHAP plots generated earlier into a multi-panel publication-ready figure.
+
+## INPUT
+- **ML_LBP_PUP_SHAP.rds**
+- **ML_LBP_PUP_MB_SHAP.rds**
+
+## OUTPUT
+- **ML_Multipanel_SHAP.png**
+
+## PREP
+```{r}
+library(tidyverse); library(ggpubr)
+```
+
+Load files
+```{r}
+PUP_SHAP = read_rds("images/ML_LBP_PUP_SHAP.rds")
+PUP_MB_SHAP = read_rds("images/ML_LBP_PUP_MB_SHAP.rds")
+```
+
+## PLOT
+```{r}
+# Ensure both plots have legends on the right, and they're formatted to be wide
+PUP_SHAP_fixed = PUP_SHAP + theme(legend.position = "right")
+PUP_MB_SHAP_fixed = PUP_MB_SHAP + theme(legend.position = "right")
+
+# Arrange with shared legend
+final_plot = ggarrange(PUP_SHAP_fixed, PUP_MB_SHAP_fixed,
+  align = "hv", nrow = 2, labels = c("A)", "B)"),
+  common.legend = TRUE, legend = "right")
+
+ggsave(plot = final_plot, filename = 'images/ML_Multipanel_SHAP.png', units = "in", dpi =300, height = 6, width = 7)
+```
+

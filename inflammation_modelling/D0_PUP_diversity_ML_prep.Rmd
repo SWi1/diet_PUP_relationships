@@ -1,0 +1,142 @@
+---
+title: "PUP diversity and ML preparation"
+author: "Stephanie Wilson"
+date: "July 2025"
+output: html_document
+---
+
+## SUMMARY
+This script calculates PUP-diversity and formats our microbial data for taxaHFE usage. Regarding microbial data specifically, this:
+- **microbial PUP gene count**: formats PUP data into hierarchical data (class > family > protein gene) for taxaHFE usage
+- **abundance PUP-containing microbial genera**: formats microbial abundance data into hierarchical data (taxonomy-based) for taxaHFE usage
+
+## INPUT
+-   **FL100_metagenome_species_full_names.csv**, microbial abundance data from MetaPhlan
+-   **metadata_313.Rdata**, study covariates, polyphenol class intakes, GI markers
+-   **PUP_taxonomy_modelling_data.Rdata**
+    -   meta: FL100 data including age, BMI, sex, fiber intake, total HEI score, and total polyphenol intake
+    -   PUPnames: minimal PUP name dataframe including gene, PUPname, PUPclass
+    -   tax: microbial PUP count data in long form
+    -   gene_genus_combo: unique combinations of genus (with at least 10% prevalence) and PUP genes
+    -   class_filtered: class intakes that were in at least 30% of our cohort
+    -   compound_filtered: compound intakes that were in at least 30% of our cohort dbpup_overview_clean.csv - PUP gene classifications metadata_313.Rdata - includes covariates for LBP analysis
+-   **dbpup_overview_clean.csv**, classification and details of microbial PUP genes
+
+## OUTPUT
+
+-   PUP_alpha_diversity_metrics.csv 
+-   PUP_matrix.csv
+-   PUP_meta_LBP.csv
+-   PUP_MB_matrix.csv
+
+## PREP
+
+```{r packages}
+library(tidyverse); library(vegan)
+```
+
+```{r data, message = FALSE}
+# PUP counts
+load("RData/PUP_taxonomy_modelling_data.Rdata")
+
+# Abundance, From A0b_microbiome_prep
+species_tax = read.csv('data/FL100_metagenome_species_full_names.csv')
+colnames(species_tax) = ifelse(grepl("^X\\d", colnames(species_tax)),
+                       sub("^X", "", colnames(species_tax)),
+                       colnames(species_tax))
+
+# metadata and LBP
+load("RData/metadata_313.Rdata")
+metadata = cleaned_data %>%
+  select(c(UserName, Age, Sex, BMI, fiber_g1000kcal, ppintake_mg1000kcal, 
+           hei_asa24_totalscore, plasma_lbp_bd1))%>%
+  mutate(ppintake_quartile = ntile(ppintake_mg1000kcal, 4))
+
+## Load dbpup classifications
+dbpup = read.csv('dbPUP/dbpup_overview_clean.csv') %>%
+  select(c(class, 'Family.Number', gene))
+```
+
+## Calculate PUP alpha-diversity metrics
+
+```{r}
+# Step 1: Aggregate to counts per subject and PUP gene
+subject_pup = tax %>%
+  rename(UserName = subject_id) %>%
+  filter(!is.na(genus)) %>%
+  group_by(UserName, gene) %>%
+  summarise(reads = sum(read_count), .groups = "drop")
+
+# Step 2: Create a wide table with genus as columns
+matrix = subject_pup %>%
+  pivot_wider(names_from = gene, values_from = reads, values_fill = 0) %>%
+  column_to_rownames("UserName")  # vegan expects rownames
+
+# Step 3: Calculate richness and evenness
+richness = rowSums(matrix > 0)
+shannon = diversity(matrix, index = "shannon")
+pielou_evenness = shannon / log(richness)
+
+# Step 4: Combine into one data frame
+diversity_metrics = tibble(
+  subject_id = rownames(matrix),
+  richness = richness,
+  shannon = shannon,
+  pielou_evenness = pielou_evenness)
+
+write.csv(diversity_metrics, 'data/PUP_alpha_diversity_metrics.csv', row.names = FALSE)
+```
+
+## Prepare PUP files for taxa HFE
+
+```{r}
+matrix_hfe = matrix %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("gene") %>%
+  left_join(dbpup) %>%
+  relocate(class, Family.Number, gene, .before = '5001') %>%
+  mutate(gene = paste("g__", gene, sep = ""),
+         class = paste("c__", class, sep = ""),
+         Family.Number = paste("f__", Family.Number, sep = "")) %>%
+  unite("clade_name", class:gene, sep = "|", remove = FALSE) %>%
+  select(-c(class:gene)) 
+
+meta_hfe = metadata %>%
+  select(c(UserName, Age, Sex, BMI, fiber_g1000kcal, hei_asa24_totalscore, plasma_lbp_bd1)) %>%
+  rename(Sample = UserName)
+
+# CSVs
+write.csv(matrix_hfe, 'taxaHFE_PUP/PUP_matrix.csv', row.names = FALSE)
+write.csv(meta_hfe, 'taxaHFE_PUP/PUP_meta_LBP.csv', row.names = FALSE)
+```
+
+## Prepare microbial files for taxaHFE
+
+Filter microbial genus data for only those that mapped to PUP genes. Then format into a hierachical format for taxaHFE usage.
+
+```{r}
+# Pull out genus names 
+genus_list = gene_genus_combo %>%
+  distinct(genus) %>%
+  mutate(search_term = str_remove(genus, "^g__"))
+
+# create the search pattern to pull out genera associated with PUP
+pattern = str_c(genus_list$search_term, collapse = "|")
+
+# GENUS LEVEL
+genus_input = species_tax %>%
+  # Pull in genera that our genes mapped to
+  filter(str_detect(Genus, pattern)) %>%
+  # Collapse the taxonomic names
+  unite("clade_name", Kingdom:Genus, sep = "|", remove = FALSE) %>%
+  # Keep only relevant content, and subjects
+  select(clade_name, all_of(as.character(meta$subject_id))) %>%
+  # Ensure everything is summarized by genus
+  group_by(clade_name) %>%
+  summarise_all(.funs = sum, na.rm = TRUE)
+
+# CSVs
+write.csv(genus_input, 'taxaHFE_PUP_MB/PUP_MB_matrix.csv', row.names = FALSE)
+write.csv(meta_hfe, 'taxaHFE_PUP_MB/PUP_meta_LBP.csv', row.names = FALSE)
+```

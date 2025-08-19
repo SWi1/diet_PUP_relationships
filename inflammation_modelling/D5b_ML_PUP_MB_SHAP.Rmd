@@ -1,0 +1,70 @@
+---
+title: "SHAP Plot for Best PUP-containing microbial Random Forest Model"
+author: "Stephanie Wilson"
+date: "July 2025"
+output: html_document
+---
+
+## SUMMARY
+This script creates a publication ready SHAP plot for the best performing ML model predicting LBP with microbial PUP genes.
+
+## INPUT
+- dbpup_overview_clean.csv - dbPUP gene classifications
+- ML_r_workspace.rds - packaged results from random forest model. 
+
+## OUTPUT
+- **ML_LBP_PUP_MB_SHAP.rds**
+- **ML_LBP_PUP_MB_SHAP.png**, image components to be combined with the other best model.
+
+## DATA PREP
+```{r}
+library(tidyverse)
+```
+
+## Establish covariate key for formatting SHAP plot feature names
+```{r}
+covariates = tibble(
+  feature = c("age", "sex_male", "bmi", "fiber_g1000kcal", "hei_asa24_totalscore"),
+  feature_publish = c("Age", "Sex, Male", "BMI", "Fiber (g/1000 kcal)", "Total HEI Score"))
+```
+
+## Create SHAP Plot
+```{r}
+# Path to best performing seed
+bestmodel = "taxaHFE_PUP_MB/output_seed_527/ML_r_workspace.rds"  
+loaded_env = load(bestmodel)
+
+# Extract the data with SHAP values, match to formatted names
+  sv_data = data.frame(feature = colnames(sv_full[[2]])) %>%
+  left_join(covariates) %>%
+  mutate(
+    feature = as.character(feature),
+    feature_publish = if_else(
+      feature_publish == "" | is.na(feature_publish),
+      feature %>%
+        str_replace("^[^_]*_", "") %>%              # remove before first underscore
+        str_replace_all("_", " ") %>%               # replace underscores with spaces
+        str_to_sentence(),                          # capitalize first word
+      feature_publish))
+
+  # Update the column names with formatted names
+  colnames(sv_full$X) = sv_data$feature_publish
+  colnames(sv_full$S) = sv_data$feature_publish
+  
+  # Create the beeswarm plot
+  pup_plot = shapviz::sv_importance(sv_full, kind = "bee", show_numbers = TRUE,
+                                bee_width = 0.2,  max_display = 5, 
+                                show_other = FALSE) + 
+    theme_bw(base_size = 11) + 
+    labs(x = '') + 
+    theme(plot.margin = margin(0, 0, 0, 0, "cm"))
+```
+
+Export plot
+```{r}
+saveRDS(pup_plot, "images/ML_LBP_PUP_MB_SHAP.rds") # for combining with other ML plot
+ggsave(plot = pup_plot, filename = "images/ML_LBP_PUP_MB_SHAP.png", 
+       units = "in", height = 6, width = 8, dpi = 300)
+```
+
+

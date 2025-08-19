@@ -1,0 +1,108 @@
+---
+title: "D1_PUP_alpha_diversity"
+author: "Stephanie Wilson"
+date: "July 2025"
+output: html_document
+---
+
+## SUMMARY
+This script performs linear models to assess whether: 
+1) polyphenol intake alpha diversity predicts PUP gene alpha diversity
+2) PUP gene alpha diversity predicts LBP 
+
+## INPUT
+-   **PUP_alpha_diversity_metrics.csv** - microbial and polyphenol intake alpha diversity metrics
+-   **FL100_metagenome_Meta.RData**
+
+## OUTPUT
+-   **PUP_alpha_diversity_models.csv** - output from six PUP alpha diversity models, including models predicting LBP
+
+## Prep
+```{r packages, message = FALSE}
+library(tidyverse); library(car); library(ggResidpanel); library(broom)
+```
+
+```{r data}
+# PUP gene diversity
+pup_diversity = read.csv('data/PUP_alpha_diversity_metrics.csv') %>%
+  rename(UserName = subject_id,
+         pup_sobs = richness,
+         pup_pielou = pielou_evenness,
+         pup_shannon = shannon)
+
+# FL100 metadata including GI markers and polyphenol intake diversity metrics.
+load('Rdata/FL100_metagenome_Meta.RData')
+
+# Merge dataframes
+diversity = merge_313 %>%
+  select(c(UserName, Age, Sex, BMI, fiber_g1000kcal, 
+           hei_asa24_totalscore, plasma_lbp_bd1,
+           mb_sobs:pp_pielous)) %>%
+  left_join(pup_diversity, by = "UserName")
+```
+
+## Predicting PUP richness
+```{r}
+pup_sobs_richness_lm = lm(pup_sobs ~ pp_sobs + Age + Sex+ BMI + fiber_g1000kcal + hei_asa24_totalscore, data = diversity)
+summary(pup_sobs_richness_lm)
+
+pup_sobs_evenness_lm = lm(pup_sobs ~ pp_pielous + Age + Sex+ BMI + fiber_g1000kcal + hei_asa24_totalscore, data = diversity)
+summary(pup_sobs_evenness_lm)
+```
+
+```{r}
+resid_panel(pup_sobs_richness_lm)
+resid_panel(pup_sobs_evenness_lm)
+```
+
+## Predicting PUP evenness
+```{r}
+pup_evenness_richness_lm = lm(pup_pielou ~ pp_sobs + Age + Sex+ BMI + fiber_g1000kcal + hei_asa24_totalscore, data = diversity)
+summary(pup_evenness_richness_lm)
+
+pup_evenness_evenness_lm = lm(pup_pielou ~ pp_pielous + Age + Sex+ BMI + fiber_g1000kcal + hei_asa24_totalscore, data = diversity)
+summary(pup_evenness_evenness_lm)
+```
+
+```{r}
+resid_panel(pup_evenness_richness_lm)
+resid_panel(pup_evenness_evenness_lm)
+```
+
+## Predicting LBP
+```{r}
+lbp_pup_richness_lm = lm(log(plasma_lbp_bd1) ~ pup_sobs + Age + Sex+ BMI + fiber_g1000kcal + hei_asa24_totalscore, data = diversity)
+
+lbp_pup_evenness_lm = lm(log(plasma_lbp_bd1) ~ pup_pielou + Age + Sex+ BMI + fiber_g1000kcal + hei_asa24_totalscore, data = diversity)
+```
+
+```{r}
+lbp_mb_richness_lm = lm(log(plasma_lbp_bd1) ~ mb_sobs + Age + Sex+ BMI + fiber_g1000kcal + hei_asa24_totalscore, data = diversity)
+
+lbp_mb_evenness_lm = lm(log(plasma_lbp_bd1) ~ mb_evenness + Age + Sex+ BMI + fiber_g1000kcal + hei_asa24_totalscore, data = diversity)
+```
+
+## Combine Model Outputs
+```{r}
+models = list(
+  pup_richness_intake_richness = pup_sobs_richness_lm,
+  pup_richness_intake_evenness = pup_sobs_evenness_lm,
+  pup_evenness_intake_richness = pup_evenness_richness_lm,
+  pup_evenness_intake_evenness = pup_evenness_evenness_lm,
+  lbp_pup_richness = lbp_pup_richness_lm,
+  lbp_pip_evenness = lbp_pup_evenness_lm,
+  lbp_mb_richness = lbp_mb_richness_lm,
+  lbp_mb_evenness = lbp_mb_evenness_lm
+)
+
+combined_models = map_dfr(models, tidy, .id = "model")
+
+write.csv(combined_models, 'output/PUP_alpha_diversity_models.csv', row.names = FALSE)
+```
+
+## Examine significant relationships
+```{r}
+sig_variables = combined_models %>%
+  filter(p.value < 0.05)
+```
+

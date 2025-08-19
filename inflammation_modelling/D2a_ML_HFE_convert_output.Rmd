@@ -1,0 +1,72 @@
+---
+title: "Converting_taxaHFE_ML_files_for_dietML"
+author: "Stephanie Wilson"
+date: "2025-07-24"
+output: html_document
+---
+
+## Summary
+This script takes taxaHFE's ML files (test_data.csv, train_data.csv) and performs a full join on rows into a singular file. Then it splits by column so to generate metadata.csv and matrix.csv.
+
+## Input
+Repeated for PUP model and PUP-containing microbial abundance model.
+- test_data.csv
+- train_data.csv
+
+## Output
+Repeated for PUP model and PUP-containing microbial abundance model.
+- metadata.csv
+- matrix.csv
+
+## Prep
+```{r message = FALSE}
+library(tidyverse)
+```
+
+## Create custom function.
+```{r}
+convert_taxaHFEoutput_for_ML = function(dir, output_dir = "dietML") {
+
+  # Pull out files given a base directory  
+  train_path = file.path(dir, "train_data.csv")
+  test_path  = file.path(dir, "test_data.csv")
+  
+  # Read files in
+  train = read.csv(train_path, check.names = FALSE)
+  test  = read.csv(test_path, check.names = FALSE)
+  
+  # Combine on rows
+  full_data = full_join(train, test) %>%
+    arrange(subject_id)
+  
+  # Meta data columns of interest
+  metadata_cols = c("age", "sex", "bmi", "fiber_g1000kcal", "hei_asa24_totalscore")
+  
+  # Split by Columns - metadata
+  df_metadata = full_data %>% select(subject_id, all_of(metadata_cols))
+  
+  # Split by Columns - features
+  df_features = full_data %>%
+    select(subject_id, everything()) %>%
+    select(-any_of(setdiff(metadata_cols, "subject_id")))
+  
+  # Write converted outputs
+  write.csv(df_metadata, file.path(dir, output_dir, "df_metadata.csv"), 
+            row.names = FALSE)
+  write.csv(df_features, file.path(dir, output_dir, "df_matrix.csv"), 
+            row.names = FALSE)
+  
+  list(metadata = df_metadata, features = df_features)
+}
+```
+
+## Apply Function to directories of interest
+dietML directy must exist in these first.
+```{r}
+# Define base directories
+dirs = c("taxaHFE_PUP", "taxaHFE_PUP_MB")
+
+# Apply function
+results = lapply(dirs, convert_taxaHFEoutput_for_ML)
+```
+

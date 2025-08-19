@@ -1,0 +1,222 @@
+---
+title: "PUP_Correlation_Abundance"
+author: "Stephanie Wilson"
+date: "April 2025"
+output: html_document
+---
+
+# SUMMARY
+Assessing the impact of polyphenol intake (total, class, compound) on microbial abundance using Spearman Correlation.
+
+## INPUT
+PUP_taxonomy_modelling_data.Rdata
+  - meta: FL100 participant data including age, BMI, sex, total fiber intake, total HEI score, and total polyphenol intake
+  - PUPnames: minimal PUP name dataframe including gene, PUPname, PUPclass
+  - tax: microbial PUP count data in long form
+  - gene_genus_combo: unique combinations of genus (with at least 10% prevalence) and PUP genes
+  - class_filtered: class intakes that were in at least 30% of our cohort
+  - compound_filtered: compound intakes that were in at least 30% of our cohort
+  
+genus_level_abundance.RData
+  - genus_input: abundance of genera within FL100
+
+## OUTPUT
+  - **PUP_abundance_correlation_totalintake.csv**
+  - **PUP_abundance_correlation_classintake.csv**
+  - **PUP_abundance_correlation_compoundintake.csv**
+
+## DATA PREP  
+Load packages
+```{r}
+library(tidyverse)
+```
+
+Load Data
+```{r}
+load("RData/PUP_taxonomy_modelling_data.Rdata")
+
+# From A0b_microbiome_prep
+load("RData/genus_level_abundance.RData")
+```
+
+## Filter microbial genus data
+First create genus list and search pattern
+```{r}
+genus_list = gene_genus_combo %>%
+  distinct(genus) %>%
+  mutate(search_term = str_remove(genus, "^g__"))
+
+pattern = str_c(genus_list$search_term, collapse = "|")
+```
+
+Filter our microbial abundance data by the pattern
+```{r}
+filtered_genus_long = genus_input %>%
+  filter(str_detect(Genus, pattern)) %>%
+  filter(!str_detect(Genus, "unclassified")) %>%
+  # Make it long format
+  pivot_longer(-Genus, names_to = "subject_id") %>%
+  mutate(subject_id = as.integer(subject_id)) %>%
+  # Merge participant data
+  filter(subject_id %in% meta$subject_id) %>%
+  left_join(meta)
+
+final_genus_list = genus_list %>% 
+  filter(genus %in% filtered_genus_long$Genus)
+```
+
+## Total Modelling
+```{r}
+# Create empty lists to store results and skipped combinations
+total_results_list = list()
+
+for (i in seq_len(nrow(final_genus_list))) {
+  
+  genus_i = final_genus_list$genus[i]
+  
+  message("Running model ", i, ": genus = ", genus_i)
+  
+  subset = filtered_genus_long %>%
+    filter(Genus == genus_i) 
+  
+    # Perform Spearman correlation
+    cor_test = cor.test(subset$value, subset$ppintake_mg1000kcal,
+                        method = "spearman", exact = FALSE)
+    
+    # Format output
+    output = tibble(
+      genus = genus_i,
+      Variable = "ppintake_mg1000kcal",
+      estimate = cor_test$estimate,
+      p_value = cor_test$p.value
+    )
+  
+  total_results_list[[length(total_results_list) + 1]] <- output
+}
+```
+
+Combine and format model output 
+```{r}
+# Combine results into a tibble
+total_results = bind_rows(total_results_list)
+
+total_results_with_corrections = total_results %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH")) 
+
+write.csv(total_results_with_corrections, 'output/PUP_abundance_correlation_totalintake.csv', row.names = FALSE)
+```
+
+
+## Class Modelling
+```{r}
+filtered_genus_long_class = filtered_genus_long %>%
+  left_join(class_filtered, by = c("subject_id" = "UserName"))
+```
+
+Run LOOP
+```{r}
+# Create empty lists to store results and skipped combinations
+class_results_list = list()
+
+class_list = colnames(class_filtered)[2:length(class_filtered)]
+
+for (class_i in class_list) {
+  message("Running models for class: ", class_i)
+
+  for (i in seq_len(nrow(final_genus_list))) {
+    
+    genus_i = final_genus_list$genus[i]
+    
+    message("  Running model ", i, ": genus = ", genus_i)
+    
+    subset = filtered_genus_long_class %>%
+      filter(Genus == genus_i)
+    
+    # Pull in class data
+    select_class = subset[[class_i]]
+    
+     # Perform Spearman correlation
+    cor_test = cor.test(subset$value, select_class,
+                        method = "spearman", exact = FALSE)
+    
+    output = tibble(
+      genus = genus_i,
+      class = class_i, 
+      estimate = cor_test$estimate,
+      p_value = cor_test$p.value
+    )
+    
+    class_results_list[[length(class_results_list) + 1]] <- output
+  }
+}
+```
+
+Combine and format modelling output
+```{r}
+# Combine results into a tibble
+class_results = bind_rows(class_results_list)
+
+class_results_with_corrections = class_results %>%
+  group_by(genus) %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH")) 
+
+write.csv(class_results_with_corrections, 'output/PUP_abundance_correlation_classintake.csv', row.names = FALSE)
+```
+
+
+## Compound Modelling
+```{r}
+filtered_genus_long_compound = filtered_genus_long %>%
+  left_join(compound_filtered, by = c("subject_id" = "UserName"))
+```
+
+Run LOOP
+```{r}
+# Create empty lists to store results and skipped combinations
+compound_results_list = list()
+
+compound_list = colnames(compound_filtered)[2:length(compound_filtered)]
+
+for (compound_i in compound_list) {
+  message("Running models for compound: ", compound_i)
+
+  for (i in seq_len(nrow(final_genus_list))) {
+    
+    genus_i = final_genus_list$genus[i]
+    
+    message("  Running model ", i, ": genus = ", genus_i)
+    
+    subset = filtered_genus_long_compound %>%
+      filter(Genus == genus_i)
+    
+    # Pull in class data
+    select_compound = subset[[compound_i]]
+    
+     # Perform Spearman correlation
+    cor_test = cor.test(subset$value, select_compound,
+                        method = "spearman", exact = FALSE)
+    
+    output = tibble(
+      genus = genus_i,
+      compound = compound_i, 
+      estimate = cor_test$estimate,
+      p_value = cor_test$p.value
+    )
+    
+    compound_results_list[[length(compound_results_list) + 1]] <- output
+  }
+}
+```
+
+Combine and format model output
+```{r}
+# Combine results into a tibble
+compound_results = bind_rows(compound_results_list)
+
+compound_results_with_corrections = compound_results %>%
+  group_by(genus) %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH")) 
+
+write.csv(compound_results_with_corrections, 'output/PUP_abundance_correlation_compoundintake.csv', row.names = FALSE)
+```
+

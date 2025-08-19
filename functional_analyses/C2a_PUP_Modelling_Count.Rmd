@@ -1,0 +1,240 @@
+---
+title: "PUP_Modelling_PUPcount"
+author: "Stephanie Wilson"
+date: "April 2025"
+output: html_document
+---
+
+# SUMMARY
+Assessing the impact of polyphenol intake (total, class, compound) on microbial count using rank based estimation regression loops.
+
+## INPUT
+PUP_taxonomy_modelling_data.Rdata
+  - meta: FL100 participant data including age, BMI, sex, total fiber intake, total HEI score, and total polyphenol intake
+  - PUPnames: minimal PUP name dataframe including gene, PUPname, PUPclass
+  - tax: microbial PUP count data in long form
+  - gene_genus_combo: unique combinations of genus (with at least 10% prevalence) and PUP genes
+  - class_filtered: class intakes that were in at least 30% of our cohort
+  - compound_filtered: compound intakes that were in at least 30% of our cohort
+
+## OUTPUT
+  - **PUP_count_modelling_totalintake.csv** - Modelling results where predictor is total polyphenol intake
+  - **PUP_count_modelling_classintake.csv** - Modelling results where predictor is class polyphenol intake
+  - **PUP_count_modelling_compoundintake.csv** - Modelling results where predictor is compound polyphenol intake
+
+## DATA PREP
+Load packages
+```{r}
+library(tidyverse); library(Rfit)
+```
+
+Load Data
+```{r}
+load("RData/PUP_taxonomy_modelling_data.Rdata")
+```
+
+## Filter our microbial abundance data by the pattern
+```{r}
+filtered_genus_long = tax %>%
+  # Pull in gene and genus combos that are in a minimum 30% of participants
+  filter(gene %in% gene_genus_combo$gene) %>%
+  filter(!str_detect(genus, "unclassified")) %>%
+  filter(!is.na(genus)) %>%
+  # Get read count sum for each unique instance of gene and genus for each subject
+  group_by(gene, PUPname, genus, subject_id) %>%
+  mutate(read_count_sum = sum(read_count)) %>%
+  distinct(gene, PUPname, genus, subject_id, .keep_all = TRUE) %>%
+  ungroup() %>%
+  select(-read_count) %>%
+  # Merge participant data
+  filter(subject_id %in% meta$subject_id) %>%
+  left_join(meta)
+```
+
+## Total Modelling
+For each unique gene and genus combination, run a rank-based estimation regression assessing the impact of total polyphenol intake on microbial PUP count
+```{r}
+# Create empty lists to store results and skipped combinations
+total_list = list()
+
+for (i in seq_len(nrow(gene_genus_combo))) {
+  
+  gene_i = gene_genus_combo$gene[i]
+  pup_i = gene_genus_combo$PUPname[i]
+  genus_i = gene_genus_combo$genus[i]
+  
+  message("Running model ", i, ": gene = ", gene_i, ", PUPname = ", pup_i, ", genus = ", genus_i)
+  
+  # Prepare the data with the unique combinations
+  subset = filtered_genus_long %>%
+    filter(gene == gene_i & PUPname == pup_i & genus == genus_i) 
+  
+  # Run Model
+  model = rfit(read_count_sum ~ ppintake_mg1000kcal + Age + Sex + BMI + fiber_g1000kcal +
+                 hei_asa24_totalscore, data = subset)
+  
+  # Format Output
+  output = as.data.frame(summary(model)$coefficients) %>%
+    rownames_to_column(var = "Variable") %>%
+    mutate(gene = gene_i, 
+           PUPname = pup_i, 
+           genus = genus_i) %>%
+    relocate(gene, PUPname, genus, .before = Variable)
+  
+  # Add output to a list
+  total_list[[length(total_list) + 1]] = output
+}
+```
+
+Combine and format model output
+```{r}
+# Combine results from list into a singular table
+total_results = bind_rows(total_list)
+
+# Filter poor models before multiple correction adjustment
+total_results_with_corrections = total_results %>%
+  # Remove models that had too many ties and were unable to form accurate estimates 
+  # Indicated by variables showing up as numeric entries 1, 2, ...7
+  filter(!str_detect(Variable, "^\\d+$")) %>%
+  group_by(gene) %>%
+  mutate(p_adj = p.adjust(p.value, method = "BH")) 
+
+write.csv(total_results_with_corrections, 'output/PUP_count_modelling_totalintake.csv', row.names = FALSE)
+```
+
+
+## Class Modelling
+```{r}
+filtered_genus_long_class = filtered_genus_long %>%
+  left_join(class_filtered, by = c("subject_id" = "UserName"))
+```
+
+Loop
+```{r}
+# Create empty lists to store results and skipped combinations
+class_results_list = list()
+
+class_list = colnames(class_filtered)[2:length(class_filtered)]
+
+# Run model for each polyphenol class
+for (class_i in class_list) {
+  message("Running models for class: ", class_i)
+  
+  # Then for each class, subset the data for each unique instance of gene and genus
+  # to analyze the impact of polyphenol intake
+  for (i in seq_len(nrow(gene_genus_combo))) {
+    
+    gene_i = gene_genus_combo$gene[i]
+    pup_i = gene_genus_combo$PUPname[i]
+    genus_i = gene_genus_combo$genus[i]
+  
+  message("Running model ", i, ": gene = ", gene_i, ", PUPname = ", pup_i, ", genus = ", genus_i)
+
+    # Subset the data for each unique instance of PUP and genus
+    subset = filtered_genus_long_class %>%
+    filter(gene == gene_i & PUPname == pup_i & genus == genus_i)
+    
+    # Build formula with class_i as variable name
+    formula_str = paste0(
+      "read_count_sum ~ `", class_i, "` + Age + Sex + BMI + fiber_g1000kcal + hei_asa24_totalscore"
+    )
+    
+    model = rfit(
+      formula = as.formula(formula_str),
+      data = subset
+    )
+    
+    output = as.data.frame(summary(model)$coefficients) %>%
+      rownames_to_column(var = "Variable") %>%
+       mutate(gene = gene_i, 
+              PUPname = pup_i, 
+              genus = genus_i,
+              class = class_i) %>%
+    relocate(gene, PUPname, genus, class, .before = Variable)
+    
+    class_results_list[[length(class_results_list) + 1]] <- output
+  }
+}
+```
+
+Combine and format model output
+```{r}
+# Combine results from list into a singular table
+class_results = bind_rows(class_results_list)
+
+# Filter poor models before multiple correction adjustment
+class_results_with_corrections = class_results %>%
+  # Remove models that had too many ties and were unable to form accurate estimates 
+  filter(!str_detect(Variable, "^\\d+$")) %>%
+  group_by(gene) %>%
+  mutate(p_adj = p.adjust(p.value, method = "BH")) 
+
+write.csv(class_results_with_corrections, 'output/PUP_count_modelling_classintake.csv', row.names = FALSE)
+```
+
+
+## Compound Modelling
+```{r}
+filtered_genus_long_compound = filtered_genus_long %>%
+  left_join(compound_filtered, by = c("subject_id" = "UserName"))
+```
+
+Run LOOP
+```{r}
+# Create empty lists to store results and skipped combinations
+compound_results_list = list()
+
+compound_list = colnames(compound_filtered)[2:length(compound_filtered)]
+
+# Run model for each polyphenol compound
+for (compound_i in compound_list) {
+  
+  message("Running models for compound: ", compound_i)
+
+  for (i in seq_len(nrow(gene_genus_combo))) {
+    
+    gene_i = gene_genus_combo$gene[i]
+    pup_i = gene_genus_combo$PUPname[i]
+    genus_i = gene_genus_combo$genus[i]
+  
+  message("Running model ", i, ": gene = ", gene_i, ", PUPname = ", pup_i, ", genus = ", genus_i)
+  
+    # Subset the data for each unique genus and gene
+    subset = filtered_genus_long_compound %>%
+    filter(gene == gene_i & PUPname == pup_i & genus == genus_i) 
+  
+    # Build formula with compound_i as variable name
+    formula_str = paste0("read_count_sum ~ `", compound_i, 
+                         "` + Age + Sex + BMI + fiber_g1000kcal + hei_asa24_totalscore")
+    
+    # Run Model
+    model = rfit(formula = as.formula(formula_str), data = subset)
+    
+    # Format Output
+    output = as.data.frame(summary(model)$coefficients) %>%
+      rownames_to_column(var = "Variable") %>%
+       mutate(gene = gene_i, 
+              PUPname = pup_i, 
+              genus = genus_i,
+              compound = compound_i) %>%
+    relocate(gene, PUPname, genus, compound, .before = Variable)
+    
+    # Add formatted output to a list
+    compound_results_list[[length(compound_results_list) + 1]] <- output
+  }
+}
+```
+
+Combine and format model output
+```{r}
+# Combine results into a tibble
+compound_results = bind_rows(compound_results_list)
+
+# Remove poor models before applying multiple comparison adjustment
+compound_results_with_corrections = compound_results %>%
+  # Remove models that had too many ties and were unable to form accurate estimates 
+  group_by(gene) %>%
+  mutate(p_adj = p.adjust(p.value, method = "BH")) 
+
+write.csv(compound_results_with_corrections, 'output/PUP_count_modelling_compoundintake.csv', row.names = FALSE)
+```

@@ -1,0 +1,116 @@
+---
+title: "PUP_Taxonomy_Modelling_Prep"
+author: "Stephanie Wilson"
+date: "March 2025"
+output: html_document
+---
+
+## SUMMARY
+Prepare dataframes from modelling the relationship between polyphenol intake and microbial abundance/microbial PUP count and packages them into an Rdata file.
+
+## INPUT
+- metadata
+- polyphenol intake data at the class and compound level
+- PUP summary data 
+- PUP names 
+- tax, microbial count data
+
+## OUTPUT
+- **PUP_taxonomy_modelling_data.Rdata** - contains PUPnames, meta, tax, gene_genus_combo, class_filtered, compound_filtered
+
+## DATA PREP
+Load Packages
+```{r message = FALSE}
+library(tidyverse); library(dplyr, exclude = "select"); library(Rfit); library(ggtext)
+```
+
+Load Data
+```{r}
+# Pull in metadata for modelling covariates
+load("RData/metadata_313.Rdata")
+
+meta = cleaned_data %>%
+  select(c(UserName, Age, Sex, BMI, fiber_g1000kcal,
+           hei_asa24_totalscore, ppintake_mg1000kcal)) %>%
+  rename(subject_id = UserName) 
+```
+
+Polyphenol Intakes
+```{r}
+class_intakes = read.csv('output/FL100_dbPUPsubstrate_class_intakes.csv')
+compound_intakes = read.csv('output/FL100_dbPUPsubstrate_compound_intakes.csv') 
+```
+
+## Clean PUP gene names for merging into our microbial PUP gene count file.
+```{r}
+# GENE COUNTS & GENE NAMES
+PUPnames = read.csv('dbPUP/dbpup_overview_clean.csv') %>%
+  select(c(gene, Name, class)) %>%
+  rename(PUPclass = class,
+         PUPname = Name) %>%
+  mutate(PUPclass = str_replace_all(PUPclass, "_", " "))
+
+# MICROBIAL TAXONOMY FOR PUP HITS
+tax = read_tsv(gzfile("taxa_all/full_taxonomic_results_counts.tsv.gz"), show_col_types = FALSE) %>%
+  rename(gene = info_2) %>%
+  left_join(PUPnames) %>%
+  relocate(PUPname, PUPclass, .after = gene) %>%
+  # Keep just bacteria and participants with metagenome and diet data
+  filter(kingdom == "k__Bacteria") %>%
+  filter(subject_id %in% meta$subject_id)
+```
+
+## Filter in classes that were in at least 30% of our participant's diets
+```{r}
+class_keep = class_intakes %>%
+  filter(UserName %in% meta$subject_id) %>%
+  select(-UserName) %>%
+  summarise(across(everything(), ~ sum(. == 0))) %>%
+  pivot_longer(cols = everything(), names_to = "class", values_to = "zero_count") %>%
+  filter(zero_count <= 0.7*nrow(meta))
+
+class_filtered = class_intakes %>%
+  select(any_of(c("UserName", class_keep$class)))
+```
+No classes were removed.
+
+## Filter in compounds that were in at least 30% of our participant diets
+```{r}
+compounds_keep = compound_intakes %>%
+  filter(UserName %in% meta$subject_id) %>%
+  select(-UserName) %>%
+  summarise(across(everything(), ~ sum(. == 0))) %>%
+  pivot_longer(cols = everything(), names_to = "compound", values_to = "zero_count") %>%
+  filter(zero_count <= 0.7*nrow(meta))
+
+compound_filtered = compound_intakes %>%
+  select(any_of(c("UserName", compounds_keep$compound)))
+```
+Initial Compound numbers: 191
+Final Compound numbers: 29
+
+## Create Dataframe with counts then create dataframe with unique combos of genes and genera
+```{r}
+tax_genus= tax %>%
+  filter(!is.na(genus)) %>%
+  filter(!genus=="g__NA") %>%
+  select(c(gene, PUPname, genus, species, subject_id, read_count)) %>%
+  # Add metadata
+  left_join(meta)
+
+# all unique combinations of PUPgene and genus
+gene_genus_combo = tax_genus %>%
+  group_by(gene, PUPname, genus) %>%
+  mutate(user_count = n_distinct(subject_id)) %>%
+  ungroup() %>%
+  # FILTER those that are not prevalent in a minimum 10% of participants.
+  filter(user_count > 313*0.1) %>%
+  distinct(gene, PUPname, genus, .keep_all = TRUE) %>%
+  select(c(gene, PUPname, genus, user_count))
+```
+
+## Save all of this for modelling!
+```{r}
+save(PUPnames, meta, tax, gene_genus_combo, class_filtered, compound_filtered, 
+     file = "RData/PUP_taxonomy_modelling_data.Rdata")
+```

@@ -1,0 +1,229 @@
+---
+title: "PUP_Taxonomy_Prevalence_PLOT"
+author: "Stephanie Wilson"
+date: "March 2025"
+output: html_document
+---
+
+## Summary
+Plots a heatmap depicting the participant prevalence of PUP gene counts within different phyla. These are supplemental plots in the manuscript. 
+
+## Inputs
+- metadata
+- PUP summary data 
+- PUP names 
+- tax, microbial count data
+
+## Summary
+This code generates plots on PUP summaries
+
+## Input
+- dbpup_meta_summary.RDS, from B0b_dbPUP_file_prep.R
+- FL100_PUP_subject_total.csv, from B0b_dbPUP_file_prep.R
+
+## Output
+- FL100_PUP_summary.csv, abundance and prevalence of PUPs from blastx hits.
+- FL100_PUP_gene_summary (png, pdf), abundance visual
+
+Load Packages
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+library(tidyverse); library(ggtext)
+```
+
+Load Data
+```{r message = FALSE}
+# PUP abundance data
+load('RData/dbpup_meta_summary.RDS')
+
+# Pull in just for the subject ids
+meta = read.csv('data/FL100_total_polyphenol_quartiles_n313.csv')
+
+
+# GENE COUNTS & GENE NAMES
+PUPnames = read.csv('dbPUP/dbpup_overview_clean.csv') %>%
+  mutate(class_abbrev = str_remove_all(Family.Number,"\\d+")) %>%
+  select(c(gene, Name, class, class_abbrev)) %>%
+  rename(PUPclass = class,
+         PUPname = Name) %>%
+  mutate(PUPclass = str_replace_all(PUPclass, "_", " "))
+
+# MICROBIAL TAXONOMY FOR PUP HITS
+tax = read_tsv(gzfile("taxa_all/full_taxonomic_results_counts.tsv.gz"), show_col_types = FALSE) %>%
+  rename(gene = info_2) %>%
+  left_join(PUPnames) %>%
+  relocate(PUPname, PUPclass, .after = gene) %>%
+  # Keep just bacteria and participants with metagenome and diet data
+  filter(kingdom == "k__Bacteria") %>%
+  filter(subject_id %in% meta$UserName)
+
+# Class Names
+gene_class = read.csv('dbPUP/dbpup_overview_clean.csv') %>%
+  select(c(gene, class)) %>%
+  rename(gene_class = class) %>%
+  mutate(gene_class = str_replace_all(gene_class, "_", " "))
+
+user_stats = read.csv("data/FL100_PUP_subject_total.csv")
+```
+
+## Create PUP Summary File
+```{r}
+summary_stats = summary_stats %>%
+  left_join(gene_class) %>%
+  relocate(gene_class, .after = Name) %>%
+  mutate(prevalence =((count - zero_count)/ count) *100) %>%
+  arrange(gene_class, desc(prevalence))
+
+
+## FORMAT THIS FOR A TABLE
+format_value = function(x, digits = 3) {
+  ifelse(abs(x) < 0.001 & x != 0,
+         formatC(x, format = "e", digits = digits),
+         formatC(x, format = "f", digits = digits))
+}
+summary_stats_format <- summary_stats %>%
+  select(gene_class, gene, Name, mean_value, sd_value, prevalence) %>%
+  mutate(
+    mean_fmt = format_value(mean_value, 3),
+    sd_fmt = format_value(sd_value, 3),
+    prevalence = round(prevalence, 1),
+    mean_sd = paste0(mean_fmt, " (", sd_fmt, ")")
+  ) %>%
+  select(gene_class, gene, Name, mean_sd, prevalence) %>%
+  arrange(gene_class, desc(prevalence))
+
+write.csv(summary_stats_format, 'output/FL100_PUP_summary.csv', row.names = FALSE)
+```
+
+## Streamline PUP names
+```{r}
+tax_names_cleaned = tax %>%
+  # Shorten PUP names by using the greek letters
+  mutate(PUPname = case_when(
+          PUPname == "RhaB2" ~ "Alpha-L-rhamnosidase B2",
+          .default = PUPname),
+         # Replace alpha/beta with Greek letters
+        PUPname = str_replace_all(PUPname, c("Alpha" = "α", "Beta" = "β", "beta" = "β")),
+        # combine formatted PUP name with UniProt ID
+        formatted_name = paste(PUPname, " (", gene, ")", sep = ""),
+        phylum = ifelse(is.na(phylum), "p__NA", phylum),
+         phylum = str_replace_all(phylum, "p__", ""),
+         phylum = ifelse(phylum == "NA", "Unclassified", phylum),
+        family= ifelse(is.na(family), "f__NA", family),
+         family = str_replace_all(family, "f__", ""),
+         family= ifelse(family == "NA", "Unclassified", family),
+        genus = ifelse(is.na(genus), "g__NA", genus),
+         genus = str_replace_all(genus, "g__", ""),
+         genus= ifelse(genus == "NA", "Unclassified", genus)) %>%
+  arrange(PUPclass, desc(formatted_name))
+```
+
+## Counts by Taxa Level
+```{r}
+phylum_counts = tax_names_cleaned %>%
+  group_by(gene, phylum) %>%
+  mutate(count = as.numeric(n()),
+         user_percent = as.numeric(n_distinct(subject_id))/313,
+         average_count = mean(read_count),
+         sd_count = sd(read_count)) %>%
+  distinct(gene, phylum, .keep_all = TRUE) %>%
+  select(c(class_abbrev, formatted_name, gene:phylum, count:sd_count)) 
+
+family_counts = tax_names_cleaned %>%
+  group_by(gene, family) %>%
+  mutate(count = as.numeric(n()),
+         user_percent = as.numeric(n_distinct(subject_id))/313,
+         average_count = mean(read_count),
+         sd_count = sd(read_count)) %>%
+  distinct(gene, family, .keep_all = TRUE) %>%
+  select(c(class_abbrev, gene:family, count:sd_count)) 
+
+genus_counts = tax_names_cleaned %>%
+  group_by(gene, genus) %>%
+  mutate(count = as.numeric(n()),
+         user_percent = as.numeric(n_distinct(subject_id))/313,
+         average_count = mean(read_count),
+         sd_count = sd(read_count)) %>%
+  distinct(gene, genus, .keep_all = TRUE) %>%
+  select(c(class_abbrev, gene:genus, count:sd_count)) 
+```
+
+## Heatmap indicating presence or absence of PUP genes detected across phyla
+```{r warning = FALSE}
+phylum_prop = ggplot(phylum_counts, aes(x = phylum, y = fct_rev(reorder(formatted_name, class_abbrev)), fill = user_percent)) +  
+  geom_tile(color = "white") +  
+  theme_bw() +
+  facet_grid(class_abbrev ~ .,  
+             switch = "y", scales = "free", space = "free") + 
+  scale_fill_gradientn(colors = c("#F1BB7B", "#5B1A18"), 
+                       values = c(0, 1),  
+                       name = "Participant\nproportion") +
+  scale_y_discrete(position = "right") +
+  labs(x = "", y = "") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    axis.text.y.right = element_markdown(size = 10),  # use ggtext for colored labels
+    axis.text.y.left = element_blank(),
+    axis.title.y.left = element_blank(),
+    panel.spacing = unit(0.0, "lines"),
+    strip.text.y.left = element_text(angle = 0, hjust = 1),
+    legend.text = element_text(size = 10),
+    legend.title = element_text(size = 10),
+    legend.position = c(1, -0.15),
+    legend.justification = c(0, 0),
+    legend.direction = "horizontal",
+     plot.margin = margin(t = 5, r = 5, b =5, l = 25) ) +
+  guides(fill = guide_colorbar(title.position = "top", title.hjust = 0.5))
+
+ggsave(plot = phylum_prop, "images/gene_class_taxonomy_prevalence.png", width = 7.5, height = 9, units = "in", dpi = 300)
+```
+
+## Distinct PUPs By class, By Phylum
+```{r}
+distinct_PUPs_phylum = phylum_counts %>%
+  group_by(phylum, PUPclass) %>%
+  count(PUPclass, name = "n_distinct_PUPs") 
+
+PUPs_phylum_plot = ggplot(distinct_PUPs_phylum, aes(x =fct_rev(phylum),  y = n_distinct_PUPs, fill = PUPclass)) +
+  geom_col(show.legend = FALSE) +
+  facet_grid(PUPclass ~ ., scales = "free_y", space = "free_y") +
+  coord_flip() +
+  labs(x = "Phylum",
+       y = "Number of Distinct PUPs") +
+  theme_bw(base_size = 12) +
+  theme(strip.text.y = element_text(angle = 0, hjust = 0),# rotate facet labels
+    strip.background = element_rect(fill = "gray95"), # optional: lighter strip background
+    panel.spacing.y = unit(0, "lines"),               # reduce vertical space between facets
+    axis.text.y = element_text(size = 10))            # adjust y-axis label size
+ 
+ggsave(plot = PUPs_phylum_plot, "images/Distinct_PUPs_Phylum.png", width = 7.5, height = 9, units = "in", dpi = 300)
+```
+
+
+## Distinct PUPs By class, By Family
+```{r}
+distinct_PUPs_family = family_counts %>%
+  group_by(phylum, family, PUPclass, class_abbrev) %>%
+  count(PUPclass, name = "n_distinct_PUPs") 
+
+PUPs_family_plot = ggplot(distinct_PUPs_family, aes(y = class_abbrev, x = fct_rev(family), fill = n_distinct_PUPs)) +
+  geom_tile(color = "white") +
+  facet_grid(phylum ~ class_abbrev, scales = "free", space = "free", switch = "y") +
+  scale_fill_gradientn(colors = c("#F1BB7B", "#5B1A18"), name = "Distinct PUPs") +
+  coord_flip() +
+  scale_x_discrete(position = "top") +  # <- puts family labels on right (top after flip)
+  labs(x = "", y="") +
+  theme_bw(base_size = 9) +
+ theme(
+    legend.position = "bottom",
+    strip.text.y.left = element_text(angle = 0, hjust = 1, size = 9),
+    panel.spacing.y = unit(0, "lines"),
+    panel.spacing.x = unit(0, "lines"),
+    axis.text.x.top = element_text(size = 9),       # keep family names on top
+    axis.text.x.bottom = element_blank(),           # remove duplicate labels below
+    axis.ticks.x.bottom = element_blank(),          # remove ticks below
+    axis.text.y = element_text(size = 9),
+    axis.title.x = element_blank(), 
+    axis.title.y = element_text(size = 9))
+
+ggsave(plot = PUPs_family_plot, "images/Distinct_PUPs_Family.png", width = 7.5, height = 9, units = "in", dpi = 300)
+```

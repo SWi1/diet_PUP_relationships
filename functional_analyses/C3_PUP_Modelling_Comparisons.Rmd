@@ -1,0 +1,109 @@
+---
+title: "Compare_Correlation_Rfits"
+author: "Stephanie Wilson"
+date: "June 2025"
+output: html_document
+---
+
+## SUMMARY
+Compares Correlation (covariate unadjusted) vs Rank-based estimation regression (covariate adjusted) outputs.
+
+## INPUT
+  - PUP_Modelling_Summary.xlsx - Combined outputs from Rfit models
+  - PUP_Correlation_Summary.xlsx - combined outputs from correlations
+  
+## OUTPUT
+  - No files
+  
+## PREP  
+Load packages
+```{r}
+library(tidyverse); library(readxl)
+```
+
+Load Data
+```{r}
+# PUP gene class info
+class_info = read.csv("dbPUP/dbpup_overview_clean.csv") %>%
+  select(c(gene, class, Family.Number)) 
+
+count_corr = read_xlsx("output/PUP_Correlation_Summary.xlsx", sheet = 3)
+abundance_corr= read_xlsx("output/PUP_Correlation_Summary.xlsx", sheet = 4)
+
+count_modelling = read_xlsx("output/PUP_Modelling_Summary.xlsx", sheet = 3) 
+abundance_modelling = read_xlsx("output/PUP_Modelling_Summary.xlsx", sheet = 4)
+```
+
+Prep data file by combining PUP class information
+```{r}
+output_class = count_modelling %>%
+  mutate(gene = str_extract(PUP_Uniprot, "(?<=\\()[^)]*(?=\\))")) %>%
+  left_join(class_info) %>%
+  # Prepare more informative name
+  mutate(PUP_Uniprot = case_when(
+          PUP_Uniprot == "RhaB2 (C4PG45)" ~ "Alpha-L-rhamnosidase B2 (C4PG45)",
+          .default = PUP_Uniprot))
+```
+
+
+## Are there relationships shared between our correlation and rank-based regression for microbial PUP counts?
+```{r}
+shared_count_keys = intersect(
+  count_corr %>% select(resolution, Genus, PUP_Uniprot, Polyphenol) %>% distinct(),
+  count_modelling %>% select(resolution, Genus, PUP_Uniprot, Polyphenol) %>% distinct())
+
+shared_count_keys
+```
+There are no shared entries for microbial PUP gene counts. 
+
+## Are there relationships shared between our correlation and rank-based regression for microbial abundance counts?
+```{r}
+shared_abundance_keys = intersect(
+  abundance_corr %>% select(resolution, Genus, Polyphenol) %>% distinct(),
+  abundance_modelling %>% select(resolution, Genus,  Polyphenol) %>% distinct())
+
+shared_abundance_keys
+```
+Only one relationship was detected with and without covariate in modelling. 
+
+## What classes are most represented?
+```{r}
+output_class %>%
+  distinct(PUP_Uniprot, .keep_all = TRUE) %>%
+  group_by(class) %>%
+  summarise(count = n())
+
+output_class %>%
+  group_by(class) %>%
+  summarise(count = n())
+```
+
+## What Genera are most represented?
+```{r}
+output_class %>%
+  group_by(Genus) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count)) %>%
+  slice(1:5)
+```
+
+## Of the compounds that show up the most, what are the major linked PUP genes?
+```{r}
+most_genus = output_class %>%
+  filter(grepl("Apigenin|Daidzein|Diosmetin 7-rutinoside", Polyphenol)) 
+
+output_class %>%
+  filter(grepl("Alpha-L-rhamnosidase|Beta-glucosidase", PUP_Uniprot)) %>%
+  group_by(PUP_Uniprot) %>%
+  summarize(count = n())
+```
+
+## Since hydrolysis PUP genes were most common, which microbial genera were these attached to?
+```{r}
+output_class %>%
+  filter(class == "hydrolysis") %>%
+  group_by(Genus) %>%
+  summarize(count = n()) %>%
+  arrange(desc(count))
+```
+

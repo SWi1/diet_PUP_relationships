@@ -1,0 +1,176 @@
+---
+title: "Modelling_Overview_PLOTS"
+author: "Stephanie Wilson"
+date: "April 2025"
+output: html_document
+---
+
+## Summary
+Create publication-ready heatmap visuals for the modelling polyphenol outputs. These are main-text manuscript figures.
+
+## INPUT
+  - PUP_Modelling_Summary.xlsx
+  - dbpup_overview_clean.csv
+  
+## OUTPUT
+Heatmap image files for PUP count and microbial abundance data
+- Abundance_Modelling_plot, PDF + PNG
+- count_model_plot_data.csv
+- Count_Modelling_plot.png
+
+## PREP  
+Load packages
+```{r warning = FALSE, message = FALSE}
+library(readxl); library(tidyverse); library(scales); library(ggtext)
+```
+
+Load data
+```{r}
+# PUP gene class info
+class_info = read.csv("dbPUP/dbpup_overview_clean.csv") %>%
+  select(c(gene, class, Family.Number)) %>%
+  mutate(class = case_when(
+    class == "hydrolysis" ~ "HR",
+    class == "functional_group_transfer" ~ "FR",
+    class == "oxidation_reduction" ~ "OR",
+    class == "unclassified" ~ "UC",
+    .default = class
+  ))
+
+count_modelling = read_xlsx("output/PUP_Modelling_Summary.xlsx", sheet = 3)
+abundance_modelling = read_xlsx("output/PUP_Modelling_Summary.xlsx", sheet = 4)
+```
+
+## Abundance Model Plot
+
+Format labels to be more informative
+```{r}
+abundance_model_data = abundance_modelling %>%
+  mutate(p_adj = as.numeric(str_replace(p_adj, "<0.001", "0.0009")),
+         Substrate = if_else(str_detect(Polyphenol, "\\*"), "*", ""),
+         Polyphenol = str_remove(Polyphenol, " \\(.*\\)"),
+         # Polyphenol = str_remove(Polyphenol, "\\*"),
+         Polyphenol = case_when(
+           Polyphenol == "ppintake_mg1000kcal" ~ "Total Polyphenol",
+           Polyphenol == "Flavanols_aka_flavan3ols" ~ "Flavanols (Flavan-3-ols)",
+           .default = Polyphenol),
+         resolution = factor(resolution, levels = c("total", "class", "compound")),
+         Genus = paste0("italic('", Genus, "')"),
+         Genus = fct_rev(Genus),
+         squished = case_when(
+           Estimate > 3 ~ "Above",
+           Estimate < -3~ "Below",
+           TRUE ~ NA_character_))
+```
+
+```{r}
+abundance_model_plot = ggplot(abundance_model_data, aes(x = Polyphenol, y = Genus, 
+                                                        fill = Estimate)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "#500000", mid = "#D1D1D1", high = "#2D5D7B", 
+                       midpoint = 0, 
+                       name = "Estimate",
+                       limits = c(-3,3),
+                       oob = squish) +
+  geom_point(data = filter(abundance_model_data, !is.na(squished)),
+             aes(x = Polyphenol, y = Genus, shape = squished),
+             color = "white", size = 2) +
+  # Specify shapes for outlying values
+  scale_shape_manual(values = c("Below" = 25, "Above" = 24),
+                     name = "Outside\nDisplay\nRange") + # triangle down/up
+  labs(x = "", y = "") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    panel.spacing = unit(0.0, "lines"),
+    legend.position = "right") +
+  facet_grid(. ~ resolution, scales = "free", space = "free") +
+  guides(shape = guide_legend(override.aes = list(color = "black")),
+         fill = guide_colorbar(order = 1),    # color gradient first
+         shape = guide_legend(order = 2)) +      # outlier shapes second)
+  scale_y_discrete(labels = scales::label_parse()) 
+
+abundance_model_plot
+
+ggsave("images/Abundance_Modelling_plot.pdf", width = 6, height = 4)
+ggsave("images/Abundance_Modelling_plot.png", width = 6, height = 4, units = "in", dpi = 300)
+```
+
+
+## DIET VS PUP COUNT PLOT
+Pull count modelling data and clean up labels for plotting
+```{r}
+count_model_data = count_modelling %>%
+  # Add PUP class information
+  mutate(gene = str_extract(PUP_Uniprot, "(?<=\\()[^)]*(?=\\))")) %>%
+  left_join(class_info) %>%
+  mutate(p_adj = as.numeric(str_replace(p_adj, "<0.001", "0.0009")),
+         Substrate = if_else(str_detect(Polyphenol, "\\*"), "*", ""),
+         Polyphenol = str_remove(Polyphenol, " \\(.*\\)"),
+         Polyphenol = str_remove(Polyphenol, "\\*"),
+         Polyphenol = case_when(
+           Polyphenol == "ppintake_mg1000kcal" ~ "Total Polyphenol",
+           Polyphenol == "Chalcones_Dihydrochalcones" ~ "Chalcones",
+           .default = Polyphenol),
+         resolution = factor(resolution, levels = c("total", "class", "compound")),
+         # Lengthen Abbreviated Name
+         PUP_Uniprot_v2 = case_when(
+            PUP_Uniprot_v2 == "RhaB2 (C4PG45)" ~ "Alpha-L-rhamnosidase B2 (C4PG45)",
+            .default = PUP_Uniprot_v2),
+        # Replace alpha/beta with Greek letters
+        PUP_Uniprot_v2 = str_replace_all(PUP_Uniprot_v2, 
+                                      c("Alpha" = "α", "Beta" = "β", "beta" = "β")),
+          # Add Reaction class abbreviation to the PUP name, Uniprot string
+        PUP_Uniprot_v2 = paste(PUP_Uniprot_v2, class, sep = ", "),
+        PUP_Uniprot_v2 = fct_rev(PUP_Uniprot_v2),
+        Genus = paste0("italic('", Genus, "')"), # italicize genera
+        squished = case_when(
+           Estimate > 200 ~ "Above",
+           Estimate < -200~ "Below",
+           TRUE ~ NA_character_))
+
+write.csv(count_model_data, "output/count_model_plot_data.csv", row.names = FALSE)
+```
+
+Create plot with x-axis as polyphenol intake across resolutions and y-axis as PUPs grouped by microbial genera. 
+```{r}
+count_model_plot = ggplot(count_model_data, aes(x = Polyphenol, y = PUP_Uniprot_v2, fill = Estimate)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "#500000", mid = "#D1D1D1", high = "#2D5D7B", 
+                       midpoint = 0, 
+                       name = "Estimate",
+                       limits = c(-200,200),
+                       oob = squish) +
+   geom_point(data = filter(count_model_data, !is.na(squished)),
+             aes(x = Polyphenol, y = PUP_Uniprot_v2, shape = squished),
+             color = "white", size = 2) +
+  theme_bw() +
+  facet_grid(Genus ~ resolution, 
+             labeller = labeller(Genus = label_parsed), #italicize genus
+             switch = "y", scales = "free", space = "free") +
+  scale_y_discrete(position = "right") +  # Move y-axis ticks/labels to right
+  scale_shape_manual(values = c("Below" = 25, "Above" = 24),
+                     name = "Outside Display Range") +   # Specify shapes for outlying values
+  labs(x = "", y = "") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    axis.text.y.right = element_text(size = 8),     # y-axis tick labels
+    axis.text.y.left = element_blank(),             # hide default left ticks
+    axis.title.y.left = element_blank(),            # hide default left label
+    panel.spacing = unit(0.0, "lines"),             # reduce facet spacing
+    strip.text.y.left = element_text(angle = 0, hjust =1),  # left-side facet horizontal
+    legend.text = element_text(size = 9),
+    legend.title = element_text(size = 9),
+    legend.position = c(1, -0.20),  # Moves legend under facet, near x-axis labels
+    legend.justification = c(0, 0),  # Aligns legend to bottom-left
+    legend.direction = "horizontal") +  # Makes legend horizontal
+  geom_text(data = filter(count_model_data, Substrate == "*"),
+            aes(label = "*"), color = "black", size = 5) +
+  guides(fill = guide_colorbar(order = 1, title.position = "top", title.hjust = 0.5),
+         shape = guide_legend(order = 2, override.aes = list(color = "black")),
+         color = guide_legend(order =3)
+         ) # Ensure outlier points are black in the legend
+
+# PDF does not export greek symbols
+ggsave("images/Count_Modelling_plot.png", width = 14, height = 8.5, units = "in", dpi = 300)
+```

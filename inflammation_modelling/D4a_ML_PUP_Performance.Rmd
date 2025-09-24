@@ -67,17 +67,17 @@ delta_metrics = all_metrics %>%
   pivot_wider(names_from = model, values_from = estimate) %>%
   filter(!is.na(test), !is.na(null), null != 0) %>%  # avoid divide by zero
   mutate(
-    percent_change = (test - null) / null * 100
-  )
+    change = test - null,
+    percent_change = (test - null) / null * 100)
 
 summary_delta = delta_metrics %>%
   group_by(metric) %>%
   summarise(
-    mean_change = mean(percent_change, na.rm = TRUE),
+    mean_change = mean(change, na.rm = TRUE),
+    mean_percent_change = mean(percent_change, na.rm = TRUE),
     ci_low = t.test(percent_change)$conf.int[1],
     ci_high = t.test(percent_change)$conf.int[2],
-    .groups = "drop"
-  )
+    .groups = "drop")
 ```
 
 ### By seed

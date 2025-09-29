@@ -1,12 +1,12 @@
 # READ ME
 
-This repository contains scripts for the analysis of dietary polyphenol intake and gut microbial taxonomic and polyphenol utilization capacity.
+This repository contains scripts for the analysis of dietary polyphenol intake and gut microbial taxonomic and polyphenol utilization capacity (Figure 1). Methods for deriving polyphenol intake have been previously described by Wilson et al 2024 in
+    <a href="https://doi.org/10.1016/j.tjnut.2024.08.010">"Association Between Dietary Polyphenol Intake and Polyphenol-Utilizing Bacteria in Healthy Adults"</a>. Code for ASA24 to FooDB polyphenol intake estimation are available on
+    <a href="https://github.com/SWi1/FooDB_polyphenol_analysis">GitHub</a>.
 
 <figure>
   <img src="images/Mapping_Figure.jpg" alt="graphical overview of key study processes" width="500">
-  <figcaption>Figure 1: Simple visual summary of study methods. These scripts here detail the analysis between dietary polyphenol intake and microbial data. Methods for deriving polyphenol intake have been previously described by Wilson et al 2024 in
-    <a href="https://doi.org/10.1016/j.tjnut.2024.08.010">"Association Between Dietary Polyphenol Intake and Polyphenol-Utilizing Bacteria in Healthy Adults"</a>. Code for ASA24 to FooDB polyphenol intake estimation are available on
-    <a href="https://github.com/SWi1/FooDB_polyphenol_analysis">GitHub</a>.
+  <figcaption>Figure 1: Simplified visual overview of study methods. Current scripts analyze relationships between dietary polyphenol intake and microbial data. 
   </figcaption>
 </figure>
 

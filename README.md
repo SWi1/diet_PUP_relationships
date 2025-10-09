@@ -25,13 +25,13 @@ Food composition database data that are publicly available (FooDB, PhenolExplore
 
 **Data**
         
--   **Dietary Recalls**, Not Publicly Available, Originally downloaded as Items Analysis File from the ASA24 Researcher Site. The dietary data utilized in the USDA Phenotyping Study underwent [quality control](https://doi.org/10.1093/cdn/nzab005) then meal disaggregation. 
+-   **Dietary Recalls**, Not Publicly Available, Originally downloaded as Items Analysis File from the ASA24 Researcher Site. The dietary data utilized in the USDA Phenotyping Study underwent quality control[^2] then meal disaggregation. 
 
 -   **FooDB**, Publicly Available, Download from [foodb.ca/downloads](https://foodb.ca/downloads). FooDB Data Dictionary for Content, Compound, and Food csv files are provided [here](https://github.com/SWi1/FooDB_polyphenol_analysis/blob/main/FooDB/README.md).
 
 -   **Phenol Explorer Version 3.6**, Publicly Available, Download from [phenol-explorer.eu/downloads](http://phenol-explorer.eu/downloads)
 
--   **dbPUP**, Publicly Available, Downloadable from the Yin Lab at the University of Nebraska Lincoln [here](https://bcb.unl.edu/dbpup/download). The citation for dbPUP is available here: [*"Polyphenol Utilization Proteins in the Human Gut Microbiome"*](https://journals.asm.org/doi/10.1128/aem.01851-21).
+-   **dbPUP**, Publicly Available, Downloadable from the Yin Lab at the University of Nebraska Lincoln [here](https://bcb.unl.edu/dbpup/download). The citation for dbPUP is available in their publication [*"Polyphenol Utilization Proteins in the Human Gut Microbiome"*](https://journals.asm.org/doi/10.1128/aem.01851-21).
  
 -   **USDA Phenotyping Study Fecal Metagenomes**, Publicly Available, Download from:
     - NCBI Sequence Read Archive [SRP354271](https://www.ncbi.nlm.nih.gov/sra/?term=SRP354271), 290 participants
@@ -92,5 +92,5 @@ Scripts in each set are intended to be run sequentially.
 
 ----
 
-[^1]: [Wilson et al. 2024. Journal of Nutrition.](https://doi.org/10.1016/j.tjnut.2024.08.010).
-
+[^1]: [Dietary Polyphenol Estimation, Wilson et al. 2024.](https://doi.org/10.1016/j.tjnut.2024.08.010).
+[^2]: [USDA Phenotyping Diet Cleaning. Bouzid et al. 2021](https://doi.org/10.1093/cdn/nzab005)

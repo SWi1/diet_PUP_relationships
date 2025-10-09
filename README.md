@@ -1,4 +1,4 @@
-# READ ME
+# Assessing the Relationship between Polyphenol Intake and the Gut Microbiome
 
 This repository contains scripts for the analysis of dietary polyphenol intake and gut microbial taxonomic and polyphenol utilization capacity (Figure 1). Methods for deriving polyphenol intake have been previously described by Wilson et al 2024.[^1] Code for ASA24 to FooDB polyphenol intake estimation are available on
     <a href="https://github.com/SWi1/FooDB_polyphenol_analysis">GitHub</a>.

@@ -1,14 +1,20 @@
-# Assessing the Relationship between Polyphenol Intake and the Gut Microbiome
+# Assessing the Relationship between Polyphenol Intake and the Polyphenol Utilization Capacity of the Gut Microbiome.
 
-This repository contains scripts for the analysis of dietary polyphenol intake and gut microbial taxonomic and polyphenol utilization capacity (Figure 1). Methods for deriving polyphenol intake have been previously described by Wilson et al 2024.[^1] Code for ASA24 to FooDB polyphenol intake estimation are available on
-    <a href="https://github.com/SWi1/FooDB_polyphenol_analysis">GitHub</a>.
+This repository contains scripts for the analysis of dietary polyphenol intake and gut microbial taxonomic and polyphenol utilization capacity. The accompanying manuscript to this repository is available online through [*Food & Function*](https://doi.org/10.1039/D6FO00158K). Methods for deriving polyphenol intake have been previously described by [Wilson et al 2024](https://doi.org/10.1016/j.tjnut.2024.08.010). Code for ASA24 to FooDB polyphenol intake estimation are available on [Github](https://github.com/SWi1/FooDB_polyphenol_analysis).
+
+```
+Wilson SMG, Oliver A, Alkan Z, Patil BS, Kable ME, Lemay DG. Association between dietary polyphenol intake and polyphenol-utilizing bacteria in healthy adults. Food Funct. 2026. doi: 10.1039/D6FO00158K.
+```
+
+
 
 <figure>
   <img src="images/Mapping_Figure.jpg" alt="graphical overview of key study processes" width="600">
-  <figcaption>Figure 1: Simplified visual overview of study methods. Current scripts analyze relationships between dietary polyphenol intake and microbial data. 
+  <figcaption>Current scripts analyze relationships between dietary polyphenol intake and microbial data. 
   </figcaption>
 </figure>
 
+----
 ## Software
 
 -   **RStudio 2025.05.0+496 "Mariposa Orchid" using R 4.4.2**, for data cleaning, analysis, and visualizations
@@ -25,7 +31,7 @@ Food composition database data that are publicly available (FooDB, PhenolExplore
 
 **Data**
         
--   **Dietary Recalls**, Not Publicly Available, Originally downloaded as Items Analysis File from the ASA24 Researcher Site. The dietary data utilized in the USDA Phenotyping Study underwent quality control[^2] then meal disaggregation. 
+-   **Dietary Recalls**, Not Publicly Available, Originally downloaded as Items Analysis File from the ASA24 Researcher Site. The dietary data utilized in the USDA Phenotyping Study underwent [quality control](https://doi.org/10.1093/cdn/nzab005) before meal disaggregation. 
 
 -   **FooDB**, Publicly Available, Download from [foodb.ca/downloads](https://foodb.ca/downloads). FooDB Data Dictionary for Content, Compound, and Food csv files are provided [here](https://github.com/SWi1/FooDB_polyphenol_analysis/blob/main/FooDB/README.md).
 
@@ -73,6 +79,7 @@ Scripts in each set are intended to be run sequentially.
     -   C2a_PUP_Modelling_Count.Rmd
     -   C2b_PUP_Modelling_Abundance.Rmd
     -   C2c_PUP_Modelling_Summary.Rmd
+    -   C2d_PUP_Modelling_Covariates.Rmd
     -   C3_PUP_Model_Comparisons.Rmd
     -   C4a_PUP_Taxonomy_Prevalence_PLOT.Rmd
     -   C4b_PUP_Modelling_PLOT.Rmd
@@ -92,5 +99,4 @@ Scripts in each set are intended to be run sequentially.
 
 ----
 
-[^1]: [Dietary Polyphenol Estimation, Wilson et al. 2024.](https://doi.org/10.1016/j.tjnut.2024.08.010).
-[^2]: [USDA Phenotyping Diet Cleaning. Bouzid et al. 2021](https://doi.org/10.1093/cdn/nzab005)
+

@@ -1,0 +1,157 @@
+---
+title: "PUP_Modelling_Summary_Covariates"
+author: "Stephanie Wilson"
+date: "April 2026"
+output: html_document
+---
+
+## SUMMARY
+This script merges total, class, and compound-level model output files into one singular file. This is done for both models on microbial abundance and PUP-gene counts. We pull out the **covariate** impacts here for the creation of Supplemental Tables 2 and 4. 
+
+## INPUT
+PUP_taxonomy_modelling_data.Rdata
+  - meta: FL100 participant data including age, BMI, sex, total fiber intake, total HEI score, and total polyphenol intake
+  - PUPnames: minimal PUP name dataframe including gene, PUPname, PUPclass
+  - tax: microbial PUP count data in long form
+  - gene_genus_combo: unique combinations of genus (with at least 10% prevalence) and PUP genes
+  - class_filtered: class intakes that were in at least 30% of our cohort
+  - compound_filtered: compound intakes that were in at least 30% of our cohort
+  
+Count Modelling Outputs
+  - PUP_count_modelling_totalintake.csv
+  - PUP_count_modelling_classintake.csv
+  - PUP_count_modelling_compoundintake.csv
+
+Abundance Modelling Outputs
+  - PUP_abundance_modelling_totalintake.csv
+  - PUP_abundance_modelling_classintake.csv
+  - PUP_abundance_modelling_compoundintake.csv
+
+## OUTPUT  
+  - *PUP_Modelling_Summary_Covariates.xlsx* - File with total, class, and compound-level model outputs merged into long-format, 
+
+## DATA PREP
+Load packages
+```{r}
+library(tidyverse); library(writexl)
+```
+
+Load Data
+```{r}
+load("RData/PUP_taxonomy_modelling_data.Rdata")
+
+# Load model outputs
+total_count = read.csv('output/PUP_count_modelling_totalintake.csv') %>%
+  mutate(resolution = "total")
+class_count = read.csv('output/PUP_count_modelling_classintake.csv') %>%
+  mutate(resolution = "class")
+compound_count = read.csv('output/PUP_count_modelling_compoundintake.csv') %>%
+  mutate(resolution = "compound")
+
+total_abund = read.csv('output/PUP_abundance_modelling_totalintake.csv') %>%
+  mutate(resolution = "total")
+class_abund = read.csv('output/PUP_abundance_modelling_classintake.csv') %>%
+  mutate(resolution = "class")
+compound_abund = read.csv('output/PUP_abundance_modelling_compoundintake.csv') %>%
+  mutate(resolution = "compound")
+
+# Load taxonomy data
+substrate_combo = read.csv('dbPUP/polyphenol_substrates_long_FooDB_taxonomy.csv') %>%
+  rename(Variable = compound_public_id)
+```
+
+```{r}
+# Load substrate information
+substrate_list = substrate_combo %>%
+  select(c(Variable, compound_name)) %>%
+  filter(!is.na(Variable)) %>% # Remove missing values
+  # So this matches our model output
+  distinct(Variable, .keep_all = TRUE) %>% # Remove duplicates
+  mutate(known_substrate = "yes")
+
+polyphenol_list = read.csv('data/FooDB_phenols_taxonomy.csv') %>%
+  rename(Variable = compound_public_id) %>%
+  select(c(Variable, compound_name)) %>% 
+  filter(!Variable %in% substrate_list$Variable) %>%
+  mutate(known_substrate = "no")
+
+all_polyphenols = full_join(substrate_list, polyphenol_list)
+```
+
+## Combine Model Outputs
+```{r}
+count_merge = full_join(total_count, class_count) %>%
+  full_join(compound_count) %>%
+  left_join(all_polyphenols) %>%
+  # Format variables to be publication ready
+  mutate(resolution = factor(resolution, levels = c("total", "class", "compound")),
+         PUP_Uniprot = paste(PUPname, " (", gene, ")", sep = ""),
+         PUP_Uniprot_v2 = paste(PUPname, gene, sep = ", "),
+         Genus = str_remove_all(genus, 'g__'),
+         Estimate = round(Estimate, 3),
+         p_adj = ifelse(p_adj < 0.001, "<0.001", round(p_adj, 3)),
+         Variable = case_when(
+           Variable == "BMI" ~ "BMI (kg/m2)",
+           Variable == "SexMale" ~ "Sex, Male",
+           Variable == "fiber_g1000kcal" ~ "Fiber (g/1000 kcal)",
+           Variable == "hei_asa24_totalscore" ~ "Total HEI-2015 Score",
+            .default = Variable),
+          resolution_info = coalesce(class, compound)) 
+
+abund_merge = full_join(total_abund, class_abund) %>%
+  full_join(compound_abund) %>%
+  # Format variables to be publication ready
+  mutate(resolution = factor(resolution, levels = c("total", "class", "compound")),
+         Genus = str_remove_all(genus, 'g__'),
+         Estimate = round(Estimate, 3),
+         p_adj = ifelse(p_adj < 0.001, "<0.001", round(p_adj, 3)),
+         Variable = case_when(
+           Variable == "BMI" ~ "BMI (kg/m2)",
+           Variable == "SexMale" ~ "Sex, Male",
+           Variable == "fiber_g1000kcal" ~ "Fiber (g/1000 kcal)",
+           Variable == "hei_asa24_totalscore" ~ "Total HEI-2015 Score",
+           .default = Variable),
+         resolution_info = coalesce(class, compound)) %>%
+  select(c(resolution, resolution_info, Genus, Variable, Estimate, p_adj))
+```
+
+
+## Signficant polyphenol findings
+```{r}
+count_cov_sig = count_merge %>%
+  # Filter significant covariate findings
+  filter(p_adj <= 0.05 & Variable %in% c("Age", "BMI (kg/m2)", "Sex, Male", 
+                                         "Fiber (g/1000 kcal)", "Total HEI-2015 Score")) %>%
+  group_by(resolution, Genus, PUP_Uniprot, Variable) %>%
+  # Summarize covariate and p-values across models
+  summarise(
+    n_unique = n_distinct(resolution_info),
+    estimate_min = min(Estimate, na.rm = TRUE),
+    estimate_max = max(Estimate, na.rm = TRUE),
+    p_adj_min = min(p_adj, na.rm = TRUE),
+    p_adj_max = max(p_adj, na.rm = TRUE),
+    .groups = "drop")%>%
+  relocate(n_unique, .after = resolution)
+
+abund_cov_sig = abund_merge %>%
+  # Filter significant covariate findings
+    filter(p_adj <= 0.05 & Variable %in% c("Age", "BMI (kg/m2)", "Sex, Male", 
+                                         "Fiber (g/1000 kcal)", "Total HEI-2015 Score")) %>%
+  # Summarize covariate and p-values across models
+  group_by(resolution, Genus, Variable) %>%
+  summarise(
+    n_unique = n_distinct(resolution_info),
+    estimate_min = min(Estimate, na.rm = TRUE),
+    estimate_max = max(Estimate, na.rm = TRUE),
+    p_adj_min = min(p_adj, na.rm = TRUE),
+    p_adj_max = max(p_adj, na.rm = TRUE),
+    .groups = "drop") %>%
+  relocate(n_unique, .after = resolution)
+```
+
+Save output into multi-tab Excel file
+```{r}
+write_xlsx(list(count_models_covariates = count_cov_sig,
+                abund_models_covariates = abund_cov_sig),
+           path = "output/PUP_Modelling_Summary_Covariates.xlsx")
+```
